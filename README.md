@@ -171,20 +171,33 @@ python -m src.main --cli --usb /dev/ttyACM0
 
 ```bash
 python -m src.main --rest-api
-
-# API Endpoints:
-# GET  /api/status     - Get drone status
-# POST /api/arm        - Arm drone
-# POST /api/disarm     - Disarm drone
-# POST /api/takeoff    - Takeoff {"altitude": 10}
-# POST /api/land       - Land
-# POST /api/goto       - Go to position {"lat": 48.8, "lon": 2.3, "alt": 15}
-# POST /api/hold       - Position hold
-# POST /api/rth        - Return to home
-# GET  /api/mission    - Get mission status
-# POST /api/mission    - Load mission
-# POST /api/mission/start - Start mission
 ```
+
+#### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| **Status** |||
+| `GET` | `/api/status` | Complete telemetry |
+| `GET` | `/api/state` | Flight state machine |
+| **Missions** |||
+| `GET` | `/api/missions` | List all missions |
+| `POST` | `/api/missions` | Upload mission |
+| `GET` | `/api/missions/{uuid}` | Get mission details |
+| `DELETE` | `/api/missions/{uuid}` | Delete mission |
+| **Execution** |||
+| `POST` | `/api/missions/{uuid}/start` | Start mission (auto-arm) |
+| `GET` | `/api/missions/active` | Active mission status |
+| `POST` | `/api/missions/active/pause` | Pause mission |
+| `POST` | `/api/missions/active/resume` | Resume mission |
+| `POST` | `/api/missions/active/stop` | Stop mission |
+| `POST` | `/api/missions/active/skip` | Skip current action |
+| `POST` | `/api/missions/active/goto/{n}` | Jump to action N |
+| **Config** |||
+| `GET` | `/api/config` | Get configuration |
+| `POST` | `/api/config` | Update configuration |
+
+All flight control goes through missions. Arming/disarming is automatic.
 
 ### MAVLink Mode
 
@@ -204,23 +217,49 @@ python scripts/simulate.py
 python -m src.main --simulate
 ```
 
-## Mission Files
+## Mission Format (v1.0)
 
-Missions are defined in JSON format:
+Missions are action-based sequences in JSON format:
 
 ```json
 {
+  "version": "1.0",
   "name": "Survey Mission",
-  "waypoints": [
-    {"lat": 48.8566, "lon": 2.3522, "alt": 10, "action": "TAKEOFF"},
-    {"lat": 48.8570, "lon": 2.3525, "alt": 15, "action": "FLY_THROUGH"},
-    {"lat": 48.8575, "lon": 2.3530, "alt": 15, "action": "HOVER", "hover_time": 5},
-    {"lat": 48.8566, "lon": 2.3522, "alt": 10, "action": "LAND"}
-  ],
-  "default_speed": 5.0,
-  "return_to_home": true
+  "defaults": {
+    "speed": 5.0,
+    "alt": 10.0
+  },
+  "actions": [
+    {"type": "takeoff", "alt": 10},
+    {"type": "goto", "lat": 48.8570, "lon": 2.3525, "alt": 15},
+    {"type": "goto", "lat": 48.8575, "lon": 2.3530},
+    {"type": "hover", "duration": 5},
+    {"type": "orient", "heading": 0},
+    {"type": "photo"},
+    {"type": "goto", "lat": 48.8566, "lon": 2.3522, "alt": 10},
+    {"type": "land"}
+  ]
 }
 ```
+
+### Available Actions
+
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `takeoff` | `alt` | Take off to altitude (meters, relative) |
+| `goto` | `lat`, `lon`, `alt?`, `speed?` | Fly to GPS position |
+| `hover` | `duration` | Hover in place (seconds) |
+| `orient` | `heading` | Set yaw orientation (0-360°, 0=North) |
+| `delay` | `duration` | Wait without action (seconds) |
+| `photo` | - | Trigger camera |
+| `land` | - | Land at current position |
+| `rth` | - | Return to home and land |
+
+**Rules:**
+- First action should be `takeoff`
+- Last action must be `land` or `rth`
+- Altitude is relative to takeoff point (barometer-based)
+- Segments are implicit (consecutive `goto` actions)
 
 ## Safety
 
@@ -253,22 +292,27 @@ pytest tests/test_pid.py
 ```
 pi_drone_nav/
 ├── src/
-│   ├── __init__.py
-│   ├── config.py           # Configuration management
-│   ├── main.py             # Entry point
+│   ├── config.py              # Configuration management
+│   ├── main.py                # Entry point
 │   ├── drivers/
-│   │   ├── msp.py          # MSP protocol driver
-│   │   ├── gps_ubx.py      # u-blox GPS driver
+│   │   ├── msp.py             # MSP protocol driver
+│   │   ├── gps_ubx.py         # u-blox GPS driver
 │   │   └── serial_manager.py
 │   ├── navigation/
-│   │   ├── pid.py          # PID controller
+│   │   ├── pid.py             # PID controller
 │   │   ├── position_controller.py
 │   │   ├── velocity_controller.py
 │   │   ├── altitude_controller.py
-│   │   └── waypoint_navigator.py
+│   │   ├── l1_controller.py   # L1 path following
+│   │   └── path_planner.py    # Segment calculation
+│   ├── mission/
+│   │   ├── models.py          # Actions, Mission, validation
+│   │   ├── store.py           # Persistent storage (JSON/UUID)
+│   │   └── executor.py        # Action execution state machine
 │   ├── flight/
 │   │   ├── state_machine.py
-│   │   └── flight_controller.py
+│   │   ├── flight_controller.py
+│   │   └── takeoff_controller.py
 │   ├── interfaces/
 │   │   ├── cli.py
 │   │   ├── rest_api.py
@@ -279,8 +323,7 @@ pi_drone_nav/
 ├── tests/
 ├── config/
 ├── scripts/
-├── requirements.txt
-└── setup.py
+└── pyproject.toml
 ```
 
 ## Control System

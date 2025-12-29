@@ -848,6 +848,7 @@ class FlightController:
 
         # Setup callbacks
         executor.on_mission_complete(self._on_mission_v2_complete)
+        executor.on_disarm_request(self._on_mission_v2_disarm)
 
     def start_mission_v2(self) -> bool:
         """
@@ -881,7 +882,12 @@ class FlightController:
     def _on_mission_v2_complete(self):
         """Callback when v1.0 mission completes"""
         logger.info("Mission v2 completed via callback")
-        self.state_machine.transition_to(FlightState.POSITION_HOLD)
+        self.state_machine.transition_to(FlightState.LANDED)
+
+    def _on_mission_v2_disarm(self):
+        """Callback to disarm after mission completes"""
+        logger.info("Mission complete, disarming")
+        self.disarm()
 
     def return_to_home(self) -> bool:
         """Return to home position"""

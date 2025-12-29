@@ -145,6 +145,7 @@ class MissionExecutor:
         self._on_action_complete: Optional[Callable[[int, Action], None]] = None
         self._on_mission_complete: Optional[Callable[[], None]] = None
         self._on_photo_trigger: Optional[Callable[[], None]] = None
+        self._on_disarm_request: Optional[Callable[[], None]] = None
 
     def load(self, mission: Mission):
         """
@@ -454,12 +455,16 @@ class MissionExecutor:
             self._complete_mission()
 
     def _complete_mission(self):
-        """Mark mission as completed"""
+        """Mark mission as completed and request disarm"""
         self.state = ExecutorState.COMPLETED
         logger.info(f"Mission '{self.mission.name}' completed")
 
         if self._on_mission_complete:
             self._on_mission_complete()
+
+        # Request disarm after mission completes (land/rth finished)
+        if self._on_disarm_request:
+            self._on_disarm_request()
 
     def _on_action_completed(self, action: Action):
         """Called when an action completes"""
@@ -568,3 +573,7 @@ class MissionExecutor:
     def on_photo_trigger(self, callback: Callable[[], None]):
         """Set callback for photo trigger"""
         self._on_photo_trigger = callback
+
+    def on_disarm_request(self, callback: Callable[[], None]):
+        """Set callback for disarm request (called when mission ends)"""
+        self._on_disarm_request = callback
