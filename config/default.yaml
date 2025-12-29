@@ -1,0 +1,156 @@
+# Pi Drone Navigation - Default Configuration
+# Copy this file to config.yaml and modify as needed
+
+# Serial port settings
+serial:
+  # MSP serial port (FC connection)
+  msp_port: "/dev/ttyACM0"
+  msp_baudrate: 115200
+
+  # GPS serial port
+  gps_port: "/dev/ttyAMA0"
+  gps_baudrate: 115200
+
+  # Auto-detect serial ports
+  auto_detect: true
+
+# GPS settings
+gps:
+  # Update rate in Hz (1-10)
+  update_rate: 10
+
+  # Protocol (ubx or nmea)
+  protocol: "ubx"
+
+  # Minimum satellites for valid fix
+  min_satellites: 6
+
+  # Enable SBAS (WAAS/EGNOS)
+  enable_sbas: true
+
+  # Position filtering
+  filter_enabled: true
+  filter_samples: 5
+
+# Navigation settings
+navigation:
+  # Position controller gains
+  position_kp: 0.8
+
+  # Velocity controller gains
+  velocity_kp: 0.5
+  velocity_ki: 0.1
+  velocity_kd: 0.05
+
+  # Maximum speeds (m/s)
+  max_horizontal_speed: 10.0
+  max_vertical_speed: 3.0
+  max_descent_speed: 2.0
+
+  # Maximum tilt angle (degrees)
+  max_tilt: 30.0
+
+  # Jerk limit for smooth control (m/s³)
+  jerk_limit: 1.7
+
+  # Waypoint acceptance radius (m)
+  default_waypoint_radius: 2.0
+
+  # Control loop frequency (Hz)
+  loop_frequency: 50
+
+# Altitude settings
+altitude:
+  # Source priority (auto, baro_fc, baro_pi, gps)
+  source: "auto"
+
+  # Altitude controller gains
+  kp: 1.0
+  ki: 0.3
+  kd: 0.5
+
+  # Hover throttle (0.0-1.0)
+  hover_throttle: 0.5
+
+  # Throttle limits
+  min_throttle: 0.1
+  max_throttle: 0.9
+
+  # Ground effect compensation
+  ground_effect_height: 1.0
+
+# Failsafe settings
+failsafe:
+  # GPS loss action (hold, land, rth)
+  gps_loss_action: "hold"
+
+  # GPS loss timeout (seconds)
+  gps_loss_timeout: 3.0
+
+  # Low battery action (land, rth)
+  low_battery_action: "rth"
+
+  # Low battery threshold (volts)
+  low_battery_voltage: 10.5
+
+  # Critical battery threshold (volts)
+  critical_battery_voltage: 9.5
+
+  # RC loss timeout (seconds) - 0 to disable
+  rc_loss_timeout: 2.0
+
+  # Maximum altitude (m)
+  max_altitude: 120.0
+
+  # Geofence radius (m) - 0 to disable
+  geofence_radius: 500.0
+
+  # Return to home altitude (m)
+  rth_altitude: 30.0
+
+# Interface settings
+interface:
+  # REST API
+  rest_api_enabled: true
+  rest_api_port: 8080
+  rest_api_host: "0.0.0.0"
+
+  # WebSocket (future)
+  websocket_enabled: false
+  websocket_port: 8081
+
+  # MAVLink
+  mavlink_enabled: true
+  mavlink_port: 14550
+  mavlink_system_id: 1
+
+  # CLI
+  cli_enabled: true
+
+# Simulation settings
+simulation:
+  # Enable SITL mode
+  enabled: false
+
+  # SITL host (Betaflight SITL)
+  sitl_host: "127.0.0.1"
+  sitl_port: 5761
+
+  # Simulated GPS
+  simulated_gps: true
+  start_latitude: 48.8566
+  start_longitude: 2.3522
+  start_altitude: 0.0
+
+# Logging settings
+logging:
+  # Log level (DEBUG, INFO, WARNING, ERROR)
+  level: "INFO"
+
+  # Log to file
+  log_to_file: true
+  log_directory: "logs"
+
+  # Flight data logging
+  flight_log_enabled: true
+  flight_log_rate: 10  # Hz

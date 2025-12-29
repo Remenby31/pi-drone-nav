@@ -1,0 +1,137 @@
+# Betaflight CLI Configuration for Pi Drone Navigation
+# Connect to Betaflight Configurator CLI and paste these commands
+
+# ============================================================
+# UART Configuration
+# ============================================================
+
+# Enable MSP on UART1 (adjust based on your FC)
+serial 0 64 115200 57600 0 115200
+
+# If using UART2 for MSP:
+# serial 1 64 115200 57600 0 115200
+
+# ============================================================
+# Flight Modes
+# ============================================================
+
+# Set AUX1 (channel 5) for ARM
+aux 0 0 0 1700 2100 0 0
+
+# Set AUX2 (channel 6) for ANGLE mode (always on for nav)
+aux 1 1 1 900 2100 0 0
+
+# Set AUX3 (channel 7) for GPS RESCUE (failsafe)
+# aux 2 46 2 1700 2100 0 0
+
+# ============================================================
+# RC Smoothing (important for MSP control)
+# ============================================================
+
+# Enable RC smoothing
+set rc_smoothing = ON
+set rc_smoothing_auto_factor = 30
+set rc_smoothing_auto_factor_throttle = 30
+
+# ============================================================
+# PID and Rates
+# ============================================================
+
+# Conservative rates for autonomous flight
+set rates_type = BETAFLIGHT
+set roll_rc_rate = 100
+set pitch_rc_rate = 100
+set yaw_rc_rate = 100
+set roll_expo = 0
+set pitch_expo = 0
+set yaw_expo = 0
+set roll_srate = 70
+set pitch_srate = 70
+set yaw_srate = 70
+
+# ANGLE mode max angle (degrees)
+set angle_level_str = 55
+
+# ============================================================
+# Arming Settings
+# ============================================================
+
+# Disable arming angle check (important for autonomous)
+set small_angle = 180
+
+# Arming without GPS fix (we handle GPS ourselves)
+# set gps_rescue_min_sats = 0
+
+# ============================================================
+# Motor Settings
+# ============================================================
+
+# Motor idle percentage
+set motor_pwm_protocol = DSHOT600
+set min_throttle = 1070
+set motor_idle_throttle_percent = 5.5
+
+# ============================================================
+# GPS Settings (if using FC GPS as backup)
+# ============================================================
+
+# If you have GPS connected to FC:
+# set gps_provider = UBLOX
+# set gps_auto_baud = ON
+# set gps_ublox_use_galileo = ON
+
+# GPS Rescue settings (failsafe)
+# set gps_rescue_min_sats = 8
+# set gps_rescue_return_alt = 30
+# set gps_rescue_ground_speed = 500
+# set gps_rescue_descent_dist = 20
+# set gps_rescue_throttle_hover = 1500
+
+# ============================================================
+# Failsafe Settings
+# ============================================================
+
+# Failsafe when signal lost
+set failsafe_delay = 5
+set failsafe_off_delay = 10
+set failsafe_procedure = DROP
+
+# If GPS Rescue enabled:
+# set failsafe_procedure = GPS-RESCUE
+
+# ============================================================
+# Save and Reboot
+# ============================================================
+
+save
+
+# ============================================================
+# Notes:
+# ============================================================
+#
+# 1. UART Selection:
+#    - Check your FC documentation for available UARTs
+#    - MSP needs a full UART (TX+RX)
+#    - Common: UART1 or UART3
+#
+# 2. Channel Mapping (for MSP_SET_RAW_RC):
+#    - Channel 1: Roll (1000-2000, center 1500)
+#    - Channel 2: Pitch (1000-2000, center 1500)
+#    - Channel 3: Throttle (1000-2000, 1000=0%)
+#    - Channel 4: Yaw (1000-2000, center 1500)
+#    - Channel 5+: AUX channels
+#
+# 3. Arming via MSP:
+#    - Set throttle to minimum (1000)
+#    - Set AUX1 to 2000 (armed)
+#    - Keep ANGLE mode active (AUX2 high)
+#
+# 4. For GPS Rescue failsafe:
+#    - Ensure GPS is configured on FC
+#    - Set minimum satellites
+#    - Test thoroughly before real flight
+#
+# 5. Testing:
+#    - ALWAYS test on bench first
+#    - Remove props during initial testing
+#    - Use Betaflight SITL for simulation

@@ -1,0 +1,26 @@
+# Pi Drone Navigation - Dependencies
+
+# Core dependencies
+pyserial>=3.5
+
+# Optional: REST API
+flask>=2.0.0
+flask-cors>=3.0.0
+
+# Optional: MAVLink support
+pymavlink>=2.4.0
+
+# Optional: YAML configuration
+pyyaml>=6.0
+
+# Development/testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Type checking (optional)
+# mypy>=1.0.0
+# types-PyYAML>=6.0.0
+
+# Documentation (optional)
+# mkdocs>=1.4.0
+# mkdocs-material>=9.0.0
