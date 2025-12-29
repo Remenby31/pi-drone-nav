@@ -1,20 +1,23 @@
 """
 REST API for Pi Drone Navigation
 
-Provides HTTP endpoints for drone control and monitoring.
+Provides HTTP endpoints for drone control, monitoring, and mission management.
 """
 
 import json
 import threading
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Optional
 import logging
 
 try:
-    from flask import Flask, request, jsonify
+    from flask import Flask, request, jsonify, Response
     from flask_cors import CORS
     FLASK_AVAILABLE = True
 except ImportError:
     FLASK_AVAILABLE = False
+
+from ..mission import MissionStore, MissionExecutor, Mission, ValidationError
 
 if TYPE_CHECKING:
     from ..flight.flight_controller import FlightController
@@ -24,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 def create_api_server(flight_controller: 'FlightController',
                       port: int = 8080,
-                      host: str = '0.0.0.0') -> Optional['APIServer']:
+                      host: str = '0.0.0.0',
+                      missions_dir: str = '~/missions') -> Optional['APIServer']:
     """
     Create and start REST API server
 
@@ -32,6 +36,7 @@ def create_api_server(flight_controller: 'FlightController',
         flight_controller: FlightController instance
         port: HTTP port
         host: Host address
+        missions_dir: Directory for mission storage
 
     Returns:
         APIServer instance or None if Flask not available
@@ -40,7 +45,11 @@ def create_api_server(flight_controller: 'FlightController',
         logger.warning("Flask not installed - REST API disabled")
         return None
 
-    server = APIServer(flight_controller, port, host)
+    server = APIServer(flight_controller, port, host, missions_dir)
+
+    # Connect mission executor to flight controller
+    flight_controller.set_mission_executor(server.mission_executor)
+
     server.start()
     return server
 
@@ -49,13 +58,18 @@ class APIServer:
     """REST API Server wrapper"""
 
     def __init__(self, flight_controller: 'FlightController',
-                 port: int = 8080, host: str = '0.0.0.0'):
+                 port: int = 8080, host: str = '0.0.0.0',
+                 missions_dir: str = '~/missions'):
         self.fc = flight_controller
         self.port = port
         self.host = host
 
         self.app = Flask(__name__)
         CORS(self.app)  # Enable CORS for web clients
+
+        # Mission management
+        self.mission_store = MissionStore(missions_dir)
+        self.mission_executor = MissionExecutor()
 
         self._thread: Optional[threading.Thread] = None
         self._setup_routes()
@@ -166,89 +180,230 @@ class APIServer:
                 'message': f'Flying to {lat}, {lon}' if success else 'Goto failed'
             })
 
-        # ==================== Mission ====================
+        # ==================== Missions (v1.0 API) ====================
 
-        @self.app.route('/api/mission', methods=['GET'])
-        def get_mission():
-            """Get current mission status"""
-            if self.fc.waypoint_nav:
-                return jsonify(self.fc.waypoint_nav.get_status())
-            return jsonify({'mission': None})
+        @self.app.route('/api/missions', methods=['GET'])
+        def list_missions():
+            """
+            List all stored missions
 
-        @self.app.route('/api/mission', methods=['POST'])
-        def load_mission():
-            """Load a mission"""
+            Returns:
+                {missions: [{uuid, name, action_count, ...}, ...]}
+            """
+            missions = self.mission_store.list_all()
+            return jsonify({'missions': missions})
+
+        @self.app.route('/api/missions', methods=['POST'])
+        def create_mission():
+            """
+            Upload a new mission
+
+            Request body: Mission JSON (without UUID)
+            Returns:
+                {uuid, name, valid: true} or error
+            """
             data = request.get_json()
             if not data:
-                return jsonify({'success': False, 'message': 'No data'}), 400
+                return jsonify({'error': 'No data provided'}), 400
 
             try:
-                from ..navigation.waypoint_navigator import Mission, Waypoint, WaypointAction
-
-                waypoints = []
-                for wp_data in data.get('waypoints', []):
-                    waypoints.append(Waypoint(
-                        latitude=wp_data['latitude'],
-                        longitude=wp_data['longitude'],
-                        altitude=wp_data.get('altitude', 10.0),
-                        action=WaypointAction[wp_data.get('action', 'FLY_THROUGH').upper()],
-                        radius=wp_data.get('radius', 2.0)
-                    ))
-
-                mission = Mission(
-                    name=data.get('name', 'API Mission'),
-                    waypoints=waypoints,
-                    default_speed=data.get('default_speed', 10.0),
-                    return_to_home=data.get('return_to_home', True)
-                )
-
-                self.fc.waypoint_nav.load_mission(mission)
-
+                mission = self.mission_store.create(data)
                 return jsonify({
-                    'success': True,
-                    'message': f'Mission loaded with {len(waypoints)} waypoints'
-                })
+                    'uuid': mission.uuid,
+                    'name': mission.name,
+                    'valid': True,
+                    'action_count': mission.action_count
+                }), 201
 
-            except Exception as e:
+            except ValidationError as e:
                 return jsonify({
-                    'success': False,
-                    'message': str(e)
+                    'error': str(e),
+                    'valid': False
                 }), 400
 
-        @self.app.route('/api/mission/start', methods=['POST'])
-        def start_mission():
-            """Start loaded mission"""
-            if self.fc.waypoint_nav and self.fc.waypoint_nav.mission:
-                success = self.fc.start_mission(self.fc.waypoint_nav.mission)
+        @self.app.route('/api/missions/<mission_uuid>', methods=['GET'])
+        def get_mission(mission_uuid: str):
+            """
+            Get mission details
+
+            Returns:
+                Full mission JSON with UUID
+            """
+            mission = self.mission_store.get(mission_uuid)
+            if not mission:
+                return jsonify({'error': 'Mission not found'}), 404
+
+            result = mission.to_dict()
+            result['uuid'] = mission.uuid
+            return jsonify(result)
+
+        @self.app.route('/api/missions/<mission_uuid>', methods=['DELETE'])
+        def delete_mission(mission_uuid: str):
+            """
+            Delete a mission
+
+            Returns:
+                {success: true} or 404
+            """
+            # Prevent deletion of active mission
+            if (self.mission_executor.mission and
+                self.mission_executor.mission.uuid == mission_uuid and
+                self.mission_executor.state.name in ('RUNNING', 'PAUSED')):
                 return jsonify({
-                    'success': success,
-                    'message': 'Mission started' if success else 'Start failed'
+                    'error': 'Cannot delete active mission'
+                }), 409
+
+            if self.mission_store.delete(mission_uuid):
+                return jsonify({'success': True})
+            return jsonify({'error': 'Mission not found'}), 404
+
+        # ==================== Active Mission Control ====================
+
+        @self.app.route('/api/missions/active', methods=['GET'])
+        def get_active_mission():
+            """
+            Get active mission status
+
+            Returns:
+                Detailed status of current mission execution
+            """
+            status = self.mission_executor.get_status_dict()
+
+            # Add position info if available
+            if self.fc._last_gps_fix:
+                status['position'] = {
+                    'lat': self.fc._last_gps_fix.latitude,
+                    'lon': self.fc._last_gps_fix.longitude,
+                    'alt': self.fc.alt_controller.current_altitude
+                }
+
+            # Calculate distance to next waypoint if goto action
+            current_action = status.get('current_action')
+            if current_action and current_action.get('type') == 'goto':
+                if self.fc._last_gps_fix:
+                    from ..utils.geo import haversine_distance
+                    dist = haversine_distance(
+                        self.fc._last_gps_fix.latitude,
+                        self.fc._last_gps_fix.longitude,
+                        current_action['lat'],
+                        current_action['lon']
+                    )
+                    status['distance_to_next_m'] = dist
+                    if status.get('target_speed', 0) > 0:
+                        status['eta_seconds'] = dist / status['target_speed']
+
+            return jsonify(status)
+
+        @self.app.route('/api/missions/<mission_uuid>/start', methods=['POST'])
+        def start_mission(mission_uuid: str):
+            """
+            Start a mission
+
+            Returns:
+                {success: true} or error
+            """
+            # Check if another mission is running
+            if self.mission_executor.state.name in ('RUNNING', 'PAUSED'):
+                return jsonify({
+                    'error': 'Another mission is active. Stop it first.'
+                }), 409
+
+            # Load mission
+            mission = self.mission_store.get(mission_uuid)
+            if not mission:
+                return jsonify({'error': 'Mission not found'}), 404
+
+            # Load into executor
+            self.mission_executor.load(mission)
+
+            # Set home from current position
+            if self.fc._last_gps_fix:
+                self.mission_executor.set_home(
+                    self.fc._last_gps_fix.latitude,
+                    self.fc._last_gps_fix.longitude,
+                    self.fc.alt_controller.current_altitude
+                )
+
+            # Start execution
+            if self.mission_executor.start():
+                return jsonify({
+                    'success': True,
+                    'message': f"Mission '{mission.name}' started"
                 })
-            return jsonify({'success': False, 'message': 'No mission loaded'})
 
-        @self.app.route('/api/mission/pause', methods=['POST'])
+            return jsonify({
+                'success': False,
+                'error': 'Failed to start mission'
+            }), 400
+
+        @self.app.route('/api/missions/active/pause', methods=['POST'])
         def pause_mission():
-            """Pause mission"""
-            if self.fc.waypoint_nav:
-                self.fc.waypoint_nav.pause()
-                return jsonify({'success': True, 'message': 'Mission paused'})
-            return jsonify({'success': False, 'message': 'No mission'})
+            """Pause active mission"""
+            if self.mission_executor.state.name != 'RUNNING':
+                return jsonify({'error': 'No running mission'}), 400
 
-        @self.app.route('/api/mission/resume', methods=['POST'])
+            self.mission_executor.pause()
+            return jsonify({
+                'success': True,
+                'message': 'Mission paused'
+            })
+
+        @self.app.route('/api/missions/active/resume', methods=['POST'])
         def resume_mission():
-            """Resume mission"""
-            if self.fc.waypoint_nav:
-                self.fc.waypoint_nav.resume()
-                return jsonify({'success': True, 'message': 'Mission resumed'})
-            return jsonify({'success': False, 'message': 'No mission'})
+            """Resume paused mission"""
+            if self.mission_executor.state.name != 'PAUSED':
+                return jsonify({'error': 'Mission not paused'}), 400
 
-        @self.app.route('/api/mission/abort', methods=['POST'])
-        def abort_mission():
-            """Abort mission"""
-            if self.fc.waypoint_nav:
-                self.fc.waypoint_nav.abort()
-                return jsonify({'success': True, 'message': 'Mission aborted'})
-            return jsonify({'success': False, 'message': 'No mission'})
+            self.mission_executor.resume()
+            return jsonify({
+                'success': True,
+                'message': 'Mission resumed'
+            })
+
+        @self.app.route('/api/missions/active/stop', methods=['POST'])
+        def stop_mission():
+            """Stop active mission"""
+            if self.mission_executor.state.name not in ('RUNNING', 'PAUSED'):
+                return jsonify({'error': 'No active mission'}), 400
+
+            self.mission_executor.stop()
+
+            # Command drone to hold position
+            self.fc.hold_position()
+
+            return jsonify({
+                'success': True,
+                'message': 'Mission stopped'
+            })
+
+        @self.app.route('/api/missions/active/skip', methods=['POST'])
+        def skip_action():
+            """Skip current action"""
+            if self.mission_executor.state.name != 'RUNNING':
+                return jsonify({'error': 'No running mission'}), 400
+
+            self.mission_executor.skip()
+            return jsonify({
+                'success': True,
+                'message': 'Action skipped',
+                'new_action_index': self.mission_executor.current_action_index
+            })
+
+        @self.app.route('/api/missions/active/goto/<int:index>', methods=['POST'])
+        def goto_action(index: int):
+            """Jump to specific action"""
+            if self.mission_executor.state.name not in ('RUNNING', 'PAUSED'):
+                return jsonify({'error': 'No active mission'}), 400
+
+            if self.mission_executor.goto_action(index):
+                return jsonify({
+                    'success': True,
+                    'message': f'Jumped to action {index}'
+                })
+
+            return jsonify({
+                'error': f'Invalid action index {index}'
+            }), 400
 
         # ==================== Configuration ====================
 
@@ -278,6 +433,13 @@ class APIServer:
             config._update_from_dict(data)
             return jsonify({'success': True, 'message': 'Configuration updated'})
 
+        # ==================== Legacy Mission API (deprecated) ====================
+
+        @self.app.route('/api/mission', methods=['GET'])
+        def get_mission_legacy():
+            """Get current mission status (deprecated, use /api/missions/active)"""
+            return jsonify(self.mission_executor.get_status_dict())
+
     def start(self):
         """Start API server in background thread"""
         self._thread = threading.Thread(
@@ -290,8 +452,13 @@ class APIServer:
             daemon=True
         )
         self._thread.start()
+        logger.info(f"REST API started on http://{self.host}:{self.port}")
 
     def stop(self):
         """Stop API server"""
         # Flask doesn't have a clean shutdown mechanism in threaded mode
         pass
+
+    def get_executor(self) -> MissionExecutor:
+        """Get mission executor for integration with flight controller"""
+        return self.mission_executor

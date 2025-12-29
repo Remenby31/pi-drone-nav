@@ -21,6 +21,7 @@ from ..navigation.velocity_controller import VelocityController, angles_to_rc
 from ..navigation.altitude_controller import AltitudeController
 from ..navigation.waypoint_navigator import WaypointNavigator, Mission
 from ..navigation.heading_estimator import HeadingEstimator
+from ..mission import MissionExecutor, ExecutorState
 from ..config import get_config
 
 import math
@@ -65,6 +66,9 @@ class FlightController:
         self.alt_controller = AltitudeController()
         self.heading_estimator = HeadingEstimator()
         self.waypoint_nav: Optional[WaypointNavigator] = None
+
+        # Mission executor (v1.0 action-based missions)
+        self.mission_executor: Optional[MissionExecutor] = None
 
         # Control loop
         self._running = False
@@ -520,7 +524,13 @@ class FlightController:
         self._update_position_hold(dt)
 
     def _update_mission(self, dt: float):
-        """Update mission execution with L1 path following"""
+        """Update mission execution"""
+        # Use new mission executor if available
+        if self.mission_executor and self.mission_executor.state == ExecutorState.RUNNING:
+            self._update_mission_v2(dt)
+            return
+
+        # Fallback to legacy waypoint navigator
         if not self.waypoint_nav:
             self._update_position_hold(dt)
             return
@@ -556,6 +566,102 @@ class FlightController:
             0.0,  # No yaw rate for now
             self.config.navigation.max_bank_angle_deg
         )) + [1500, 1500, 1500, 1500]
+
+    def _update_mission_v2(self, dt: float):
+        """Update mission execution using v1.0 action-based executor"""
+        if not self.mission_executor:
+            return
+
+        # Update executor with current position
+        if self._last_gps_fix:
+            self.mission_executor.update_position(
+                self._last_gps_fix.latitude,
+                self._last_gps_fix.longitude,
+                self.alt_controller.current_altitude,
+                self._current_yaw
+            )
+
+        # Get executor output
+        output = self.mission_executor.update(dt)
+
+        # Handle state transitions based on output
+        if output.should_takeoff:
+            if self.state_machine.state != FlightState.TAKEOFF:
+                self._target_altitude = output.target_alt or 10.0
+                if self.takeoff_controller:
+                    self.takeoff_controller.start(self._target_altitude)
+                self.state_machine.transition_to(FlightState.TAKEOFF)
+            self._update_takeoff(dt)
+            return
+
+        if output.should_land:
+            if self.state_machine.state != FlightState.LANDING:
+                self.state_machine.transition_to(FlightState.LANDING)
+            self._update_landing(dt)
+            return
+
+        if output.should_rth:
+            if self.state_machine.state != FlightState.RTH:
+                self.state_machine.transition_to(FlightState.RTH)
+            self._update_rth(dt)
+            return
+
+        if output.should_hold:
+            # Position hold (for hover, delay, orient, photo)
+            self._update_position_hold(dt)
+
+            # Handle heading change for orient action
+            if output.target_heading is not None:
+                # TODO: Add yaw control
+                pass
+            return
+
+        # Navigation to target (goto action)
+        if output.target_lat is not None and output.target_lon is not None:
+            target_alt = output.target_alt or self.alt_controller.current_altitude
+
+            self.pos_controller.set_target_gps(
+                output.target_lat,
+                output.target_lon,
+                target_alt
+            )
+            self.alt_controller.set_target_altitude(target_alt)
+
+            # Position → Velocity
+            vel_n, vel_e, vel_d = self.pos_controller.update()
+
+            # Apply speed limit if specified
+            if output.target_speed:
+                speed = math.sqrt(vel_n**2 + vel_e**2)
+                if speed > output.target_speed:
+                    scale = output.target_speed / speed
+                    vel_n *= scale
+                    vel_e *= scale
+
+            self.vel_controller.set_target_velocity(vel_n, vel_e, vel_d)
+
+            # Velocity → Attitude
+            attitude_cmd = self.vel_controller.update(dt)
+
+            # Altitude → Throttle
+            throttle = self.alt_controller.update(dt)
+
+            # Convert to RC
+            self._rc_channels = list(angles_to_rc(
+                attitude_cmd.roll_deg,
+                attitude_cmd.pitch_deg,
+                throttle,
+                0.0,
+                self.config.navigation.max_bank_angle_deg
+            )) + [1800, 1800, 1500, 1500]
+
+        # Check if mission completed
+        if self.mission_executor.state == ExecutorState.COMPLETED:
+            logger.info("Mission v2 completed")
+            self.state_machine.transition_to(FlightState.POSITION_HOLD)
+        elif self.mission_executor.state == ExecutorState.STOPPED:
+            logger.info("Mission v2 stopped")
+            self.state_machine.transition_to(FlightState.POSITION_HOLD)
 
     def _update_landing(self, dt: float):
         """Update landing sequence"""
@@ -714,7 +820,7 @@ class FlightController:
 
     def start_mission(self, mission: Mission) -> bool:
         """
-        Start a waypoint mission
+        Start a waypoint mission (legacy API)
 
         Args:
             mission: Mission to execute
@@ -730,6 +836,52 @@ class FlightController:
             return self.state_machine.transition_to(FlightState.MISSION)
 
         return False
+
+    def set_mission_executor(self, executor: MissionExecutor):
+        """
+        Set the mission executor for v1.0 action-based missions
+
+        Args:
+            executor: MissionExecutor instance from REST API
+        """
+        self.mission_executor = executor
+
+        # Setup callbacks
+        executor.on_mission_complete(self._on_mission_v2_complete)
+
+    def start_mission_v2(self) -> bool:
+        """
+        Start the loaded v1.0 mission
+
+        Returns:
+            True if mission started successfully
+        """
+        if not self.mission_executor:
+            logger.error("No mission executor configured")
+            return False
+
+        if self.mission_executor.state != ExecutorState.READY:
+            logger.error(f"Mission executor not ready: {self.mission_executor.state.name}")
+            return False
+
+        # Set home position
+        if self._last_gps_fix:
+            self.mission_executor.set_home(
+                self._last_gps_fix.latitude,
+                self._last_gps_fix.longitude,
+                self.alt_controller.current_altitude
+            )
+
+        # Start executor
+        if self.mission_executor.start():
+            return self.state_machine.transition_to(FlightState.MISSION)
+
+        return False
+
+    def _on_mission_v2_complete(self):
+        """Callback when v1.0 mission completes"""
+        logger.info("Mission v2 completed via callback")
+        self.state_machine.transition_to(FlightState.POSITION_HOLD)
 
     def return_to_home(self) -> bool:
         """Return to home position"""
@@ -758,6 +910,10 @@ class FlightController:
             'armed': self._armed,
             'hover_throttle': self.alt_controller.hover_throttle
         }
+
+        # Add mission executor status (v1.0 missions)
+        if self.mission_executor:
+            telemetry['mission'] = self.mission_executor.get_status_dict()
 
         # Add takeoff status if active
         if self.takeoff_controller and self.takeoff_controller.is_active:
