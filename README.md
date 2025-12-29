@@ -10,54 +10,32 @@ Pi Drone Navigation provides high-level autonomous flight capabilities for drone
 
 - **Autonomous Navigation**: GPS waypoint navigation with fly-through and hover modes
 - **Position Control**: Cascaded control system (Position → Velocity → Angle)
-- **Multiple Interfaces**: CLI, REST API, MAVLink (QGroundControl compatible)
+- **Client/Server Architecture**: Server daemon with REST API, lightweight CLI client
 - **Betaflight Integration**: Works with Betaflight in Angle mode
-- **Mission Planning**: JSON-based mission files
+- **Mission Planning**: JSON-based action sequences
 - **Failsafe**: Configurable GPS loss and low battery handling
 - **Simulation**: Full SITL support for testing without hardware
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Raspberry Pi Zero 2 W                    │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────────┐ │
-│  │   CLI   │  │REST API │  │MAVLink  │  │   Mission       │ │
-│  └────┬────┘  └────┬────┘  └────┬────┘  │   Planner       │ │
-│       │            │            │       └────────┬────────┘ │
-│       └────────────┴────────────┴────────────────┘          │
-│                           │                                  │
-│                  ┌────────┴────────┐                        │
-│                  │ Flight Controller│                        │
-│                  │   (Main Logic)   │                        │
-│                  └────────┬────────┘                        │
-│         ┌─────────────────┼─────────────────┐               │
-│         │                 │                 │               │
-│  ┌──────┴──────┐  ┌───────┴───────┐  ┌──────┴──────┐       │
-│  │   Position  │  │   Velocity    │  │  Altitude   │       │
-│  │  Controller │  │  Controller   │  │ Controller  │       │
-│  └──────┬──────┘  └───────┬───────┘  └──────┬──────┘       │
-│         │                 │                 │               │
-│         └─────────────────┴─────────────────┘               │
-│                           │                                  │
-│         ┌─────────────────┼─────────────────┐               │
-│         │                 │                 │               │
-│  ┌──────┴──────┐  ┌───────┴───────┐  ┌──────┴──────┐       │
-│  │ MSP Driver  │  │  GPS Driver   │  │   Filters   │       │
-│  │ (Betaflight)│  │   (u-blox)    │  │             │       │
-│  └──────┬──────┘  └───────┬───────┘  └─────────────┘       │
-│         │                 │                                  │
-└─────────┼─────────────────┼──────────────────────────────────┘
-          │                 │
-     ┌────┴────┐       ┌────┴────┐
-     │ UART/USB│       │  UART   │
-     └────┬────┘       └────┬────┘
-          │                 │
-     ┌────┴────┐       ┌────┴────┐
-     │Betaflight│      │  u-blox │
-     │   FC    │       │  GPS    │
-     └─────────┘       └─────────┘
+┌─────────────────┐         HTTP         ┌──────────────────────────────┐
+│   pidrone CLI   │ ◄──────────────────► │     pidrone-server           │
+│   (client)      │      localhost:8080  │   (systemd service)          │
+└─────────────────┘                      │                              │
+                                         │  ┌────────────────────────┐  │
+                                         │  │   FlightController     │  │
+                                         │  │   - MSP (Betaflight)   │  │
+                                         │  │   - GPS (UBX)          │  │
+                                         │  │   - Navigation         │  │
+                                         │  │   - MissionExecutor    │  │
+                                         │  └────────────────────────┘  │
+                                         │                              │
+                                         │  ┌────────────────────────┐  │
+                                         │  │   REST API (Flask)     │  │
+                                         │  │   Port 8080            │  │
+                                         │  └────────────────────────┘  │
+                                         └──────────────────────────────┘
 ```
 
 ## Requirements
@@ -76,36 +54,44 @@ Pi Drone Navigation provides high-level autonomous flight capabilities for drone
 
 ## Installation
 
-### Quick Install
-
 ```bash
+# Clone repository
 git clone https://github.com/yourusername/pi-drone-nav.git
 cd pi-drone-nav
-./scripts/install.sh
+
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install with all features
+pip install -e ".[full]"
 ```
 
-### Manual Install
+### Install as Service (Production)
 
 ```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# Copy systemd service file
+sudo cp config/pidrone.service /etc/systemd/system/
 
-# Install dependencies
-pip install -r requirements.txt
+# Reload systemd
+sudo systemctl daemon-reload
 
-# Install package
-pip install -e .
+# Enable service at boot
+sudo systemctl enable pidrone
+
+# Start service
+sudo systemctl start pidrone
 ```
 
 ## Configuration
 
 1. Copy the default configuration:
    ```bash
-   cp config/default.yaml config.yaml
+   mkdir -p ~/.pidrone/missions
+   cp config/default.yaml ~/.pidrone/config.yaml
    ```
 
-2. Edit `config.yaml` with your settings:
+2. Edit `~/.pidrone/config.yaml` with your settings:
    - Serial ports for MSP and GPS
    - Navigation parameters
    - Failsafe settings
@@ -113,73 +99,66 @@ pip install -e .
 3. Configure Betaflight:
    - Enable MSP on a UART
    - Set ANGLE mode on an AUX channel
-   - See `config/betaflight_setup.txt` for CLI commands
+   - For pure MSP control: `set serialrx_provider = 0` and enable RX_MSP feature
 
 ## Usage
 
-### CLI Mode
+### CLI Commands
+
+The `pidrone` command communicates with the server via REST API:
 
 ```bash
-# Activate virtual environment
-source .venv/bin/activate
+# Status
+pidrone status              # Show drone status (position, attitude, battery)
 
-# Run with CLI interface
-python -m src.main --cli --usb /dev/ttyACM0
+# Mission management
+pidrone missions            # List stored missions
+pidrone upload flight.json  # Upload a mission
+pidrone delete my-mission   # Delete a mission
+
+# Mission execution
+pidrone start my-mission    # Start mission (auto-arms)
+pidrone stop                # Stop mission (land + disarm)
+pidrone pause               # Pause mission (hover)
+pidrone resume              # Resume paused mission
+
+# Diagnostics
+pidrone diag                # Full system diagnostics
+pidrone test msp            # Test MSP communication
+pidrone test gps            # Test GPS reception
+pidrone test sensors        # Test attitude, IMU, battery
+pidrone test motors         # Test motors (requires confirmation)
+pidrone test preflight      # Run pre-flight checks
+
+# Server management
+pidrone serve               # Start server in foreground (dev mode)
+pidrone logs                # Show server logs
+pidrone logs -f             # Follow server logs
 ```
 
-#### Available Commands
-
-| Command | Description |
-|---------|-------------|
-| **Status** | |
-| `status` | Show drone status (position, attitude, GPS, state) |
-| `watch [on\|off]` | Toggle continuous status display |
-| `diag` | Full system diagnostics |
-| **Flight Control** | |
-| `arm` | Arm the drone |
-| `disarm` | Disarm the drone (only when not flying) |
-| `takeoff [alt]` | Takeoff to altitude (default: 3m) |
-| `land` | Initiate landing |
-| `hold` | Hold current position (GPS) |
-| `rth` | Return to home |
-| **Navigation** | |
-| `goto <lat> <lon> [alt]` | Fly to GPS coordinates |
-| `mission load <file>` | Load mission from JSON file |
-| `mission start` | Start loaded mission |
-| `mission pause` | Pause mission |
-| `mission resume` | Resume mission |
-| `mission abort` | Abort mission |
-| `mission status` | Show mission status |
-| **Diagnostics** | |
-| `test msp` | Test MSP communication |
-| `test rc` | Test RC channel control |
-| `test motors` | Test motors individually (WARNING: motors spin!) |
-| `test gps` | Test GPS reception |
-| `test sensors` | Test attitude, altitude, IMU, battery |
-| `test preflight` | Run pre-flight checks |
-| `test all` | Run all safe tests (excludes motors) |
-| **Configuration** | |
-| `config` | Show all configuration |
-| `config <section>` | Show section (e.g., `config navigation`) |
-| `config <section.key> <value>` | Set value |
-| `calibrate acc` | Calibrate accelerometer |
-| `calibrate mag` | Calibrate magnetometer |
-| `reboot` | Reboot flight controller |
-| `quit` / `exit` | Exit CLI |
-
-### REST API Mode
+### Server Commands
 
 ```bash
-python -m src.main --rest-api
+# Start server (foreground)
+pidrone-server --usb /dev/ttyACM0
+
+# Start in simulation mode
+pidrone-server --simulate
+
+# Custom port
+pidrone-server --port 9000
+
+# With verbose logging
+pidrone-server -v --log-file /var/log/pidrone.log
 ```
 
-#### API Endpoints
+### REST API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| **Status** |||
+| **Health** |||
+| `GET` | `/api/health` | Health check |
 | `GET` | `/api/status` | Complete telemetry |
-| `GET` | `/api/state` | Flight state machine |
 | **Missions** |||
 | `GET` | `/api/missions` | List all missions |
 | `POST` | `/api/missions` | Upload mission |
@@ -190,32 +169,10 @@ python -m src.main --rest-api
 | `GET` | `/api/missions/active` | Active mission status |
 | `POST` | `/api/missions/active/pause` | Pause mission |
 | `POST` | `/api/missions/active/resume` | Resume mission |
-| `POST` | `/api/missions/active/stop` | Stop mission |
-| `POST` | `/api/missions/active/skip` | Skip current action |
-| `POST` | `/api/missions/active/goto/{n}` | Jump to action N |
-| **Config** |||
-| `GET` | `/api/config` | Get configuration |
-| `POST` | `/api/config` | Update configuration |
-
-All flight control goes through missions. Arming/disarming is automatic.
-
-### MAVLink Mode
-
-```bash
-python -m src.main --mavlink
-
-# Connect with QGroundControl on UDP port 14550
-```
-
-### Simulation Mode
-
-```bash
-# Terminal 1: Start simulator
-python scripts/simulate.py
-
-# Terminal 2: Run navigation
-python -m src.main --simulate
-```
+| `POST` | `/api/missions/active/stop` | Stop mission (land + disarm) |
+| **Diagnostics** |||
+| `GET` | `/api/diagnostics` | Full system diagnostics |
+| `POST` | `/api/test/{component}` | Run diagnostic test |
 
 ## Mission Format (v1.0)
 
@@ -259,7 +216,6 @@ Missions are action-based sequences in JSON format:
 - First action should be `takeoff`
 - Last action must be `land` or `rth`
 - Altitude is relative to takeoff point (barometer-based)
-- Segments are implicit (consecutive `goto` actions)
 
 ## Safety
 
@@ -293,7 +249,12 @@ pytest tests/test_pid.py
 pi_drone_nav/
 ├── src/
 │   ├── config.py              # Configuration management
-│   ├── main.py                # Entry point
+│   ├── server/                # Server daemon
+│   │   ├── main.py            # Server entry point
+│   │   └── api.py             # REST API endpoints
+│   ├── cli/                   # CLI client
+│   │   ├── main.py            # CLI entry point
+│   │   └── client.py          # HTTP client
 │   ├── drivers/
 │   │   ├── msp.py             # MSP protocol driver
 │   │   ├── gps_ubx.py         # u-blox GPS driver
@@ -303,26 +264,22 @@ pi_drone_nav/
 │   │   ├── position_controller.py
 │   │   ├── velocity_controller.py
 │   │   ├── altitude_controller.py
-│   │   ├── l1_controller.py   # L1 path following
-│   │   └── path_planner.py    # Segment calculation
+│   │   └── path_planner.py
 │   ├── mission/
 │   │   ├── models.py          # Actions, Mission, validation
-│   │   ├── store.py           # Persistent storage (JSON/UUID)
-│   │   └── executor.py        # Action execution state machine
+│   │   ├── store.py           # Persistent storage
+│   │   └── executor.py        # Action execution
 │   ├── flight/
 │   │   ├── state_machine.py
 │   │   ├── flight_controller.py
 │   │   └── takeoff_controller.py
-│   ├── interfaces/
-│   │   ├── cli.py
-│   │   ├── rest_api.py
-│   │   └── mavlink_bridge.py
 │   └── utils/
 │       ├── geo.py
 │       └── logger.py
 ├── tests/
 ├── config/
-├── scripts/
+│   ├── default.yaml
+│   └── pidrone.service        # Systemd service file
 └── pyproject.toml
 ```
 
@@ -349,9 +306,3 @@ Key parameters:
 ## License
 
 MIT License - See LICENSE file for details.
-
-## Acknowledgments
-
-- [Betaflight](https://github.com/betaflight/betaflight) - Flight controller firmware
-- [iNav](https://github.com/iNavFlight/inav) - Navigation inspiration
-- [ArduPilot](https://github.com/ArduPilot/ardupilot) - Reference implementation
