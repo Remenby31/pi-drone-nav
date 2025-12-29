@@ -267,6 +267,9 @@ class MAVLinkBridge:
 
         # GLOBAL_POSITION_INT
         pos = telemetry['position']
+        # Normalize yaw to 0-360 range for MAVLink hdg field (unsigned, 0-35999)
+        yaw_deg = telemetry['attitude']['yaw']
+        hdg = int(((yaw_deg % 360) + 360) % 360 * 100)  # Ensure 0-35999
         msg = mav.global_position_int_encode(
             time_boot_ms=int(time.time() * 1000) & 0xFFFFFFFF,
             lat=int(pos['lat'] * 1e7),
@@ -274,7 +277,7 @@ class MAVLinkBridge:
             alt=int(pos['alt'] * 1000),
             relative_alt=int(pos['alt'] * 1000),
             vx=0, vy=0, vz=0,  # TODO: Add velocity
-            hdg=int(telemetry['attitude']['yaw'] * 100)
+            hdg=hdg
         )
         self._send(msg.pack(mav))
 
@@ -293,6 +296,8 @@ class MAVLinkBridge:
         self._send(msg.pack(mav))
 
         # GPS_RAW_INT
+        # Normalize yaw for cog field (course over ground, unsigned 0-35999)
+        cog = int(((att['yaw'] % 360) + 360) % 360 * 100)
         msg = mav.gps_raw_int_encode(
             time_usec=int(time.time() * 1e6),
             fix_type=3 if pos['satellites'] >= 6 else 0,
@@ -302,7 +307,7 @@ class MAVLinkBridge:
             eph=100,
             epv=100,
             vel=0,
-            cog=int(att['yaw'] * 100),
+            cog=cog,
             satellites_visible=pos['satellites']
         )
         self._send(msg.pack(mav))
