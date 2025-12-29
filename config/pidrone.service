@@ -1,0 +1,40 @@
+[Unit]
+Description=Pi Drone Navigation Server
+Documentation=https://github.com/yourusername/pi-drone-nav
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi
+
+# Main command - adjust path if installed elsewhere
+ExecStart=/usr/local/bin/pidrone-server
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/.pidrone
+PrivateTmp=true
+
+# Hardware access (serial ports, GPIO)
+SupplementaryGroups=dialout gpio
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pidrone
+
+[Install]
+WantedBy=multi-user.target

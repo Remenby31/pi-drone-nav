@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "pyserial>=3.5",
+    "requests>=2.28.0",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +41,9 @@ dev = [
 ]
 
 [project.scripts]
-pi-drone-nav = "src.main:main"
+pidrone = "src.cli.main:main"
+pidrone-server = "src.server.main:main"
+pi-drone-nav = "src.server.main:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/pi-drone-nav"
