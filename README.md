@@ -121,23 +121,51 @@ pip install -e .
 
 ```bash
 # Activate virtual environment
-source venv/bin/activate
+source .venv/bin/activate
 
 # Run with CLI interface
-python -m src.main --cli
-
-# Available commands:
-#   status  - Show drone status
-#   arm     - Arm the drone
-#   disarm  - Disarm the drone
-#   takeoff [alt] - Takeoff to altitude (default 3m)
-#   land    - Land the drone
-#   goto <lat> <lon> [alt] - Go to position
-#   hold    - Hold current position
-#   rth     - Return to home
-#   mission load <file> - Load mission
-#   mission start - Start mission
+python -m src.main --usb /dev/ttyACM0
 ```
+
+#### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| **Status** | |
+| `status` | Show drone status (position, attitude, GPS, state) |
+| `watch [on\|off]` | Toggle continuous status display |
+| `diag` | Full system diagnostics |
+| **Flight Control** | |
+| `arm` | Arm the drone |
+| `disarm` | Disarm the drone (only when not flying) |
+| `takeoff [alt]` | Takeoff to altitude (default: 3m) |
+| `land` | Initiate landing |
+| `hold` | Hold current position (GPS) |
+| `rth` | Return to home |
+| **Navigation** | |
+| `goto <lat> <lon> [alt]` | Fly to GPS coordinates |
+| `mission load <file>` | Load mission from JSON file |
+| `mission start` | Start loaded mission |
+| `mission pause` | Pause mission |
+| `mission resume` | Resume mission |
+| `mission abort` | Abort mission |
+| `mission status` | Show mission status |
+| **Diagnostics** | |
+| `test msp` | Test MSP communication |
+| `test rc` | Test RC channel control |
+| `test motors` | Test motors individually (WARNING: motors spin!) |
+| `test gps` | Test GPS reception |
+| `test sensors` | Test attitude, altitude, IMU, battery |
+| `test preflight` | Run pre-flight checks |
+| `test all` | Run all safe tests (excludes motors) |
+| **Configuration** | |
+| `config` | Show all configuration |
+| `config <section>` | Show section (e.g., `config navigation`) |
+| `config <section.key> <value>` | Set value |
+| `calibrate acc` | Calibrate accelerometer |
+| `calibrate mag` | Calibrate magnetometer |
+| `reboot` | Reboot flight controller |
+| `quit` / `exit` | Exit CLI |
 
 ### REST API Mode
 

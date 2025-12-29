@@ -92,6 +92,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--cli",
+        action="store_true",
+        default=False,
+        help="Enable interactive CLI interface"
+    )
+
+    parser.add_argument(
         "--rest-api",
         action="store_true",
         default=True,
@@ -197,18 +204,26 @@ def main():
 
     logger.info("Flight controller running. Press Ctrl+C to stop.")
 
-    # Main loop
+    # Main loop - CLI or background
     try:
-        while True:
-            time.sleep(1)
+        if args.cli:
+            # Run interactive CLI (blocks until quit)
+            from .interfaces.cli import CLI
+            cli = CLI(_flight_controller)
+            logger.info("Starting interactive CLI...")
+            cli.cmdloop()
+        else:
+            # Background mode - just print status periodically
+            while True:
+                time.sleep(1)
 
-            # Print status periodically
-            telemetry = _flight_controller.get_telemetry()
-            state = telemetry['state']['state']
-            alt = telemetry['position']['alt']
-            sats = telemetry['position']['satellites']
+                # Print status periodically
+                telemetry = _flight_controller.get_telemetry()
+                state = telemetry['state']['state']
+                alt = telemetry['position']['alt']
+                sats = telemetry['position']['satellites']
 
-            logger.debug(f"State: {state}, Alt: {alt:.1f}m, Sats: {sats}")
+                logger.debug(f"State: {state}, Alt: {alt:.1f}m, Sats: {sats}")
 
     except KeyboardInterrupt:
         pass

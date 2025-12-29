@@ -483,7 +483,7 @@ class WaypointNavigator:
 
     def _calculate_distance_to_wp(self) -> float:
         """Calculate distance to current waypoint"""
-        if self.current_wp_index >= len(self.mission.waypoints):
+        if self.mission is None or self.current_wp_index >= len(self.mission.waypoints):
             return 0.0
 
         wp = self.mission.waypoints[self.current_wp_index]

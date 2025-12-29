@@ -176,13 +176,27 @@ class FlightStateMachine:
             return True
         return False
 
-    def on_enter(self, state: FlightState, callback: Callable[[], None]):
-        """Register callback for entering a state"""
-        self._on_enter[state] = callback
+    def on_enter(self, state: FlightState, callback: Callable[[], None] = None):
+        """Register callback for entering a state (can be used as decorator)"""
+        def decorator(func):
+            self._on_enter[state] = func
+            return func
 
-    def on_exit(self, state: FlightState, callback: Callable[[], None]):
-        """Register callback for exiting a state"""
-        self._on_exit[state] = callback
+        if callback is not None:
+            self._on_enter[state] = callback
+            return None
+        return decorator
+
+    def on_exit(self, state: FlightState, callback: Callable[[], None] = None):
+        """Register callback for exiting a state (can be used as decorator)"""
+        def decorator(func):
+            self._on_exit[state] = func
+            return func
+
+        if callback is not None:
+            self._on_exit[state] = callback
+            return None
+        return decorator
 
     def on_transition(self, callback: Callable[[FlightState, FlightState], None]):
         """Register callback for any state transition"""

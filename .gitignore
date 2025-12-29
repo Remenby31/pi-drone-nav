@@ -119,3 +119,6 @@ logs/
 config.yaml
 !config/default.yaml
 *.bak
+
+# Generated runtime data
+config/hover_throttle.json

@@ -362,12 +362,349 @@ class CLI(cmd.Cmd):
         """Exit the CLI"""
         return self.do_quit(arg)
 
+    # ==================== Test/Diagnostic Commands ====================
+
+    def do_test(self, arg):
+        """
+        Run diagnostic tests
+        Usage:
+            test msp       - Test MSP communication
+            test rc        - Test RC channel control
+            test motors    - Test individual motors (WARNING: motors will spin!)
+            test gps       - Test GPS reception
+            test sensors   - Test all sensors (attitude, altitude, IMU)
+            test preflight - Run pre-flight checks
+            test all       - Run all safe tests (no motors)
+        """
+        if not arg:
+            print("Usage: test <msp|rc|motors|gps|sensors|preflight|all>")
+            return
+
+        cmd = arg.lower()
+
+        if cmd == 'msp':
+            self._test_msp()
+        elif cmd == 'rc':
+            self._test_rc()
+        elif cmd == 'motors':
+            self._test_motors()
+        elif cmd == 'gps':
+            self._test_gps()
+        elif cmd == 'sensors':
+            self._test_sensors()
+        elif cmd == 'preflight':
+            self._test_preflight()
+        elif cmd == 'all':
+            print("=== Running all safe tests ===\n")
+            self._test_msp()
+            print()
+            self._test_sensors()
+            print()
+            self._test_gps()
+            print()
+            self._test_rc()
+            print()
+            self._test_preflight()
+        else:
+            print(f"Unknown test: {cmd}")
+
+    def _test_msp(self):
+        """Test MSP communication"""
+        print("=== Test MSP Communication ===")
+        if not self.fc.msp:
+            print("  ERROR: MSP not initialized")
+            return
+
+        try:
+            api = self.fc.msp.get_api_version()
+            print(f"  API Version: {api}")
+
+            variant = self.fc.msp.get_fc_variant()
+            print(f"  FC Variant: {variant}")
+
+            status = self.fc.msp.get_status()
+            if status:
+                print(f"  Cycle time: {status.cycle_time}us")
+                print(f"  CPU load: {status.cpu_load}%")
+
+            print("  Result: PASS")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            print("  Result: FAIL")
+
+    def _test_rc(self):
+        """Test RC channel control"""
+        print("=== Test RC Channels ===")
+        if not self.fc.msp:
+            print("  ERROR: MSP not initialized")
+            return
+
+        try:
+            # Read current RC
+            rc_before = self.fc.msp.get_rc_channels()
+            print(f"  RC before: {rc_before[:8]}")
+
+            # Send test RC (neutral values, disarmed)
+            test_values = [1500, 1500, 1000, 1500, 1000, 1500, 1500, 1500]
+            print(f"  Sending: {test_values}")
+
+            for _ in range(10):
+                self.fc.msp.set_raw_rc(test_values)
+                time.sleep(0.02)
+
+            rc_after = self.fc.msp.get_rc_channels()
+            print(f"  RC after: {rc_after[:8]}")
+
+            if rc_after[2] == 1000:  # Throttle should be 1000
+                print("  Result: PASS")
+            else:
+                print("  Result: PARTIAL (RC values may not be applied - check RX_MSP)")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            print("  Result: FAIL")
+
+    def _test_motors(self):
+        """Test motors individually"""
+        print("=== Test Motors ===")
+        print("  WARNING: Motors will spin!")
+        confirm = input("  Remove propellers and type 'yes' to continue: ")
+        if confirm.lower() != 'yes':
+            print("  Cancelled")
+            return
+
+        if not self.fc.msp:
+            print("  ERROR: MSP not initialized")
+            return
+
+        try:
+            # Read initial motor values
+            motors = self.fc.msp.get_motor_values()
+            print(f"  Initial motors: {motors[:4]}")
+
+            # Test each motor
+            for i in range(4):
+                print(f"  Testing motor {i+1}...")
+                # Set motor i to 1100, others to 1000
+                test_values = [1000, 1000, 1000, 1000]
+                test_values[i] = 1100
+                self.fc.msp.set_motor_test(test_values)
+                time.sleep(0.5)
+
+                motors = self.fc.msp.get_motor_values()
+                if motors[i] > 1000:
+                    print(f"    Motor {i+1}: OK (value={motors[i]})")
+                else:
+                    print(f"    Motor {i+1}: FAIL (value={motors[i]})")
+
+            # Stop all motors
+            self.fc.msp.stop_all_motors()
+            print("  Motors stopped")
+            print("  Result: DONE")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            # Emergency stop
+            if self.fc.msp:
+                self.fc.msp.stop_all_motors()
+            print("  Result: FAIL")
+
+    def _test_gps(self):
+        """Test GPS reception"""
+        print("=== Test GPS ===")
+        if not self.fc.msp:
+            print("  ERROR: MSP not initialized")
+            return
+
+        try:
+            gps = self.fc.msp.get_gps_as_fix()
+            if gps:
+                print(f"  Satellites: {gps.num_satellites}")
+                print(f"  Fix: {gps.fix_valid}")
+                print(f"  Latitude: {gps.latitude:.6f}")
+                print(f"  Longitude: {gps.longitude:.6f}")
+                print(f"  Altitude: {gps.altitude_msl:.1f}m")
+                print(f"  HDOP: {gps.hdop:.1f}" if hasattr(gps, 'hdop') else "  HDOP: N/A")
+
+                if gps.num_satellites >= 5 and gps.fix_valid:
+                    print("  Result: PASS")
+                elif gps.num_satellites >= 3:
+                    print("  Result: PARTIAL (weak fix)")
+                else:
+                    print("  Result: FAIL (no fix)")
+            else:
+                print("  ERROR: Could not get GPS data")
+                print("  Result: FAIL")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            print("  Result: FAIL")
+
+    def _test_sensors(self):
+        """Test attitude and altitude sensors"""
+        print("=== Test Sensors ===")
+        if not self.fc.msp:
+            print("  ERROR: MSP not initialized")
+            return
+
+        try:
+            # Attitude
+            att = self.fc.msp.get_attitude()
+            if att:
+                print(f"  Attitude: roll={att.roll:.1f}, pitch={att.pitch:.1f}, yaw={att.yaw:.1f}")
+                if abs(att.roll) < 45 and abs(att.pitch) < 45:
+                    print("    Attitude: OK")
+                else:
+                    print("    Attitude: WARNING (drone not level?)")
+            else:
+                print("  Attitude: FAIL")
+
+            # Altitude
+            alt = self.fc.msp.get_altitude()
+            if alt:
+                print(f"  Altitude: {alt.altitude_cm/100:.2f}m, vario={alt.vario_cms/100:.2f}m/s")
+                print("    Altitude: OK")
+            else:
+                print("  Altitude: FAIL")
+
+            # IMU
+            imu = self.fc.msp.get_raw_imu()
+            if imu:
+                print(f"  IMU acc: ({imu.acc_x}, {imu.acc_y}, {imu.acc_z})")
+                print(f"  IMU gyro: ({imu.gyro_x}, {imu.gyro_y}, {imu.gyro_z})")
+                print("    IMU: OK")
+            else:
+                print("  IMU: FAIL")
+
+            # Analog (battery)
+            analog = self.fc.msp.get_analog()
+            if analog:
+                print(f"  Battery: {analog.vbat:.1f}V, {analog.mah_drawn}mAh used")
+                if analog.vbat > 10.0:  # > 10V
+                    print("    Battery: OK")
+                else:
+                    print("    Battery: LOW")
+            else:
+                print("  Analog: FAIL")
+
+            print("  Result: DONE")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            print("  Result: FAIL")
+
+    def _test_preflight(self):
+        """Run pre-flight checks"""
+        print("=== Pre-flight Checks ===")
+        try:
+            from ..flight.preflight_checks import PreflightChecker
+            from ..config import TakeoffConfig
+
+            config = TakeoffConfig()
+            checker = PreflightChecker(config)
+
+            gps = self.fc.msp.get_gps_as_fix() if self.fc.msp else None
+            att = self.fc.msp.get_attitude() if self.fc.msp else None
+
+            result = checker.run_checks(self.fc.msp, gps, att)
+
+            for check in result.checks:
+                symbol = "PASS" if check.result.name == "PASS" else "WARN" if check.result.name == "WARN" else "FAIL"
+                print(f"  [{symbol}] {check.name}: {check.message}")
+
+            print()
+            if result.passed:
+                print("  Overall: PASS - Ready for flight")
+            else:
+                print("  Overall: FAIL - Do not fly!")
+        except Exception as e:
+            print(f"  ERROR: {e}")
+            print("  Result: FAIL")
+
+    def do_diag(self, arg):
+        """
+        Full system diagnostics
+        Shows detailed system information
+        """
+        print("\n" + "="*60)
+        print("         SYSTEM DIAGNOSTICS")
+        print("="*60)
+
+        # State machine
+        print("\n--- Flight State ---")
+        print(f"  State: {self.fc.state_machine.state.name}")
+        print(f"  Previous: {self.fc.state_machine.previous_state.name}")
+        print(f"  Time in state: {self.fc.state_machine.time_in_state:.1f}s")
+        print(f"  Is flying: {self.fc.state_machine.is_flying}")
+
+        # MSP connection
+        print("\n--- MSP Connection ---")
+        if self.fc.msp:
+            print(f"  Connected: Yes")
+            try:
+                api = self.fc.msp.get_api_version()
+                print(f"  API: {api}")
+            except:
+                print(f"  API: Error reading")
+        else:
+            print(f"  Connected: No")
+
+        # GPS
+        print("\n--- GPS ---")
+        gps_source = getattr(self.fc, '_gps_source', 'unknown')
+        print(f"  Source: {gps_source}")
+        if self.fc.msp:
+            try:
+                gps = self.fc.msp.get_gps_as_fix()
+                if gps:
+                    print(f"  Satellites: {gps.num_satellites}")
+                    print(f"  Fix: {gps.fix_valid}")
+                    print(f"  Position: {gps.latitude:.6f}, {gps.longitude:.6f}")
+            except:
+                print("  Error reading GPS")
+
+        # Controllers
+        print("\n--- Controllers ---")
+        if self.fc.alt_controller:
+            debug = self.fc.alt_controller.get_debug_info()
+            print(f"  Altitude target: {debug['target_alt']:.1f}m")
+            print(f"  Altitude current: {debug['current_alt']:.1f}m")
+            print(f"  Hover throttle: {debug['hover_throttle']:.2f}")
+
+        # Takeoff controller
+        print("\n--- Takeoff Controller ---")
+        if self.fc.takeoff_controller:
+            status = self.fc.takeoff_controller.get_status()
+            print(f"  Phase: {status['phase']}")
+            print(f"  Target altitude: {status['target_altitude']}m")
+            print(f"  Current throttle: {status['current_throttle']:.2f}")
+            print(f"  Liftoff detected: {status['liftoff_detected']}")
+
+        # Hover learner
+        print("\n--- Hover Throttle Learner ---")
+        if self.fc.hover_learner:
+            info = self.fc.hover_learner.get_status()
+            print(f"  Learned throttle: {info['hover_throttle']:.3f}")
+            print(f"  Samples: {info['samples_count']}")
+            print(f"  Learning active: {info['learning_active']}")
+
+        print("\n" + "="*60)
+
     # ==================== Help Overrides ====================
 
     def help_takeoff(self):
         print("Takeoff to specified altitude (default 3m)")
         print("Usage: takeoff [altitude_m]")
         print("Example: takeoff 5")
+
+    def help_test(self):
+        print("Run diagnostic tests")
+        print("Usage: test <msp|rc|motors|gps|sensors|preflight|all>")
+        print()
+        print("Tests:")
+        print("  msp       - Test MSP communication with flight controller")
+        print("  rc        - Test RC channel control (sends neutral values)")
+        print("  motors    - Test individual motors (WARNING: motors spin!)")
+        print("  gps       - Test GPS reception and fix quality")
+        print("  sensors   - Test attitude, altitude, IMU, battery")
+        print("  preflight - Run pre-flight checks")
+        print("  all       - Run all safe tests (excludes motors)")
 
     def help_goto(self):
         print("Navigate to GPS coordinates")
