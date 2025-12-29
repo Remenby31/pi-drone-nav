@@ -12,6 +12,7 @@ References:
 import struct
 import time
 import threading
+import math
 from enum import IntEnum
 from dataclasses import dataclass
 from typing import Optional, Tuple, List, Union
@@ -585,13 +586,71 @@ class MSPClient:
         Set motor test values (MSP_SET_MOTOR)
 
         Args:
-            motor_values: List of motor values
+            motor_values: List of motor values (1000-2000)
 
         Warning:
             Only use for testing! Bypasses flight controller safety.
         """
+        # Pad to 8 motors if needed
+        if len(motor_values) < 8:
+            motor_values = list(motor_values) + [1000] * (8 - len(motor_values))
+
         data = struct.pack('<' + 'H' * len(motor_values), *motor_values)
         self.send_command(MSPCommand.MSP_SET_MOTOR, data)
+
+    def stop_all_motors(self):
+        """
+        Emergency stop - set all motors to minimum (1000)
+
+        Should be called at end of any motor test or on error/interrupt.
+        """
+        self.set_motor_test([1000] * 8)
+        logger.info("All motors stopped (1000)")
+
+    def test_motors_sequential(self, max_value: int = 1200, step: int = 25,
+                                step_delay: float = 0.15, hold_time: float = 0.3):
+        """
+        Test each motor sequentially with a ramp up/down pattern
+
+        Args:
+            max_value: Maximum motor value (default 1200 - gentle spin)
+            step: Value increment per step (default 25)
+            step_delay: Delay between steps in seconds (default 0.15)
+            hold_time: Time to hold at max value (default 0.3s)
+
+        Warning:
+            REMOVE PROPELLERS before running this test!
+        """
+        try:
+            for motor_num in range(4):
+                logger.info(f"Testing Motor {motor_num + 1}")
+
+                # Ramp up
+                for val in range(1000, max_value + 1, step):
+                    motors = [1000] * 8
+                    motors[motor_num] = val
+                    self.set_motor_test(motors)
+                    time.sleep(step_delay)
+
+                # Hold at max
+                time.sleep(hold_time)
+
+                # Ramp down
+                for val in range(max_value, 999, -step):
+                    motors = [1000] * 8
+                    motors[motor_num] = val
+                    self.set_motor_test(motors)
+                    time.sleep(step_delay / 2)
+
+                # Stop this motor
+                self.stop_all_motors()
+                time.sleep(0.3)
+
+            logger.info("Motor test complete")
+
+        finally:
+            # Always stop motors at the end
+            self.stop_all_motors()
 
     def set_arming_disabled(self, disabled: bool, reason: int = 0):
         """
@@ -617,6 +676,63 @@ class MSPClient:
         self.send_command(MSPCommand.MSP_MAG_CALIBRATION)
 
     # ==================== Utility ====================
+
+    def get_gps_as_fix(self) -> Optional['GPSFix']:
+        """
+        Get GPS data from Betaflight and convert to GPSFix format.
+
+        Calculates NED velocity from ground_speed and ground_course:
+        - vel_north = ground_speed * cos(course)
+        - vel_east = ground_speed * sin(course)
+
+        Returns:
+            GPSFix compatible with UBX driver, or None if no GPS data
+        """
+        # Import here to avoid circular dependency
+        from .gps_ubx import GPSFix, GPSFixType
+
+        try:
+            raw_gps = self.get_raw_gps()
+        except MSPError:
+            return None
+
+        if not raw_gps.fix:
+            return GPSFix(
+                timestamp=time.time(),
+                fix_type=GPSFixType.NO_FIX,
+                fix_valid=False,
+                num_satellites=raw_gps.num_sat
+            )
+
+        # Convert ground course to radians (course is degrees from north, clockwise)
+        course_rad = math.radians(raw_gps.ground_course)
+
+        # Calculate NED velocity components
+        vel_north = raw_gps.ground_speed * math.cos(course_rad)
+        vel_east = raw_gps.ground_speed * math.sin(course_rad)
+
+        return GPSFix(
+            timestamp=time.time(),
+            fix_type=GPSFixType.FIX_3D if raw_gps.num_sat >= 4 else GPSFixType.FIX_2D,
+            fix_valid=True,
+            num_satellites=raw_gps.num_sat,
+            latitude=raw_gps.lat,
+            longitude=raw_gps.lon,
+            altitude_msl=raw_gps.alt,
+            altitude_ellipsoid=raw_gps.alt,  # MSP doesn't distinguish
+            horizontal_accuracy=raw_gps.pdop * 2.5,  # Rough estimate from PDOP
+            vertical_accuracy=raw_gps.pdop * 4.0,
+            vel_north=vel_north,
+            vel_east=vel_east,
+            vel_down=0.0,  # MSP doesn't provide vertical velocity
+            ground_speed=raw_gps.ground_speed,
+            speed_3d=raw_gps.ground_speed,  # Approximation
+            heading=raw_gps.ground_course,
+            heading_accuracy=5.0,  # Default estimate
+            pdop=raw_gps.pdop,
+            hdop=raw_gps.pdop,  # Approximation
+            vdop=raw_gps.pdop * 1.5  # Approximation
+        )
 
     def close(self):
         """Close the connection"""

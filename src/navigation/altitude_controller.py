@@ -58,7 +58,7 @@ class AltitudeController:
 
         # Limits
         self.max_climb_rate = nav.max_vertical_speed_ms
-        self.hover_throttle = nav.hover_throttle
+        self._hover_throttle = nav.hover_throttle  # Use private var to avoid property setter
         self.throttle_margin = nav.throttle_margin
 
         # Filtering
@@ -82,6 +82,42 @@ class AltitudeController:
         # Landing detection
         self._landing_detected = False
         self._low_altitude_time = 0.0
+
+        # Ground reference for takeoff
+        self._ground_reference_alt = 0.0
+
+    @property
+    def hover_throttle(self) -> float:
+        """Get current hover throttle value"""
+        return self._hover_throttle
+
+    @hover_throttle.setter
+    def hover_throttle(self, value: float):
+        """
+        Set hover throttle (used by hover throttle learner)
+
+        Args:
+            value: Throttle value that maintains hover (0.0-1.0)
+        """
+        self._hover_throttle = max(0.2, min(0.8, value))
+
+    def set_ground_reference(self, altitude_m: float):
+        """
+        Set ground reference altitude for takeoff
+
+        Args:
+            altitude_m: Ground altitude in meters
+        """
+        self._ground_reference_alt = altitude_m
+
+    def get_height_agl(self) -> float:
+        """
+        Get height above ground reference
+
+        Returns:
+            Height above ground in meters
+        """
+        return self._current_altitude - self._ground_reference_alt
 
     def set_target_altitude(self, altitude_m: float):
         """Set target altitude in meters"""
@@ -231,7 +267,7 @@ class AltitudeController:
         Args:
             throttle: Throttle value that maintains hover (0.0-1.0)
         """
-        self.hover_throttle = max(0.2, min(0.8, throttle))
+        self.hover_throttle = throttle  # Property setter handles clamping
 
     def get_debug_info(self) -> dict:
         """Get debug information"""

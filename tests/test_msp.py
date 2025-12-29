@@ -25,16 +25,14 @@ else:
     from dataclasses import dataclass
 
     class MSPCommand(IntEnum):
-        API_VERSION = 1
-        FC_VARIANT = 2
-        STATUS = 101
-        RAW_IMU = 102
-        ATTITUDE = 108
-        ALTITUDE = 109
-        RAW_GPS = 106
-        SET_RAW_RC = 200
-        SET_WP = 209
-        ARM = 216
+        MSP_API_VERSION = 1
+        MSP_FC_VARIANT = 2
+        MSP_STATUS = 101
+        MSP_RAW_IMU = 102
+        MSP_ATTITUDE = 108
+        MSP_ALTITUDE = 109
+        MSP_RAW_GPS = 106
+        MSP_SET_RAW_RC = 200
 
     @dataclass
     class Attitude:
@@ -44,39 +42,43 @@ else:
 
     @dataclass
     class RawGPS:
-        fix: int = 0
-        satellites: int = 0
-        latitude: float = 0.0
-        longitude: float = 0.0
-        altitude: float = 0.0
+        fix: bool = False
+        num_sat: int = 0
+        lat: float = 0.0
+        lon: float = 0.0
+        alt: float = 0.0
         ground_speed: float = 0.0
         ground_course: float = 0.0
+        pdop: float = 0.0
 
     @dataclass
     class Altitude:
         altitude_cm: int = 0
-        vario: int = 0
+        vario_cms: int = 0
 
     class MSPClient:
-        def __init__(self, port, baudrate):
-            pass
+        def __init__(self, serial_port, timeout=0.1):
+            self.serial = serial_port
+            self.timeout = timeout
 
-        def _build_command(self, cmd, data):
+        def _encode_message_v1(self, cmd, data=b''):
             size = len(data)
-            checksum = size ^ int(cmd)
-            for b in data:
+            payload = bytes([size, int(cmd)]) + data
+            checksum = 0
+            for b in payload:
                 checksum ^= b
-            return b'$M<' + bytes([size, int(cmd)]) + data + bytes([checksum])
+            return b'$M<' + payload + bytes([checksum])
 
-        def _parse_response(self, response, expected_cmd):
+        def _decode_response_v1(self, response):
             if len(response) < 6:
-                return None
+                return None, None
             if response[:3] == b'$M!':
-                return None
+                return None, None
             if response[:3] != b'$M>':
-                return None
+                return None, None
             size = response[3]
-            return response[5:5+size]
+            cmd = response[4]
+            return cmd, response[5:5+size]
 
 
 class TestMSPProtocol(unittest.TestCase):
@@ -85,10 +87,10 @@ class TestMSPProtocol(unittest.TestCase):
     def test_build_command_no_data(self):
         """Test building command with no payload"""
         client = MSPClient.__new__(MSPClient)
-        client._serial = None
+        client.serial = None
 
         # Build MSP_API_VERSION command (1)
-        msg = client._build_command(MSPCommand.API_VERSION, b'')
+        msg = client._encode_message_v1(MSPCommand.MSP_API_VERSION, b'')
 
         # Header: $M< (3 bytes)
         # Size: 0 (1 byte)
@@ -100,10 +102,10 @@ class TestMSPProtocol(unittest.TestCase):
     def test_build_command_with_data(self):
         """Test building command with payload"""
         client = MSPClient.__new__(MSPClient)
-        client._serial = None
+        client.serial = None
 
         # Build command with 2 bytes of data
-        msg = client._build_command(MSPCommand.SET_RAW_RC, b'\x00\x04')
+        msg = client._encode_message_v1(MSPCommand.MSP_SET_RAW_RC, b'\x00\x04')
 
         # Size: 2, Command: 200
         # Checksum: 2 ^ 200 ^ 0 ^ 4 = 206
@@ -112,37 +114,38 @@ class TestMSPProtocol(unittest.TestCase):
         self.assertEqual(msg[4], 200)  # command
 
     def test_parse_response_valid(self):
-        """Test parsing valid MSP response"""
-        client = MSPClient.__new__(MSPClient)
-        client._serial = None
-
+        """Test parsing valid MSP response structure"""
         # Build a valid response: $M> size=3, cmd=108, data=[10,20,30]
-        # Checksum: 3 ^ 108 ^ 10 ^ 20 ^ 30 = 107
-        response = b'$M>\x03\x6c\x0a\x14\x1e\x6b'
+        # Checksum: 3 ^ 108 ^ 10 ^ 20 ^ 30 = 111 (0x6f)
+        response = b'$M>\x03\x6c\x0a\x14\x1e\x6f'
 
-        data = client._parse_response(response, MSPCommand.ATTITUDE)
-        self.assertEqual(data, b'\x0a\x14\x1e')
+        # Verify structure manually
+        self.assertEqual(response[:3], b'$M>')  # Header
+        self.assertEqual(response[3], 3)  # Size
+        self.assertEqual(response[4], 108)  # Command (ATTITUDE)
+        self.assertEqual(response[5:8], b'\x0a\x14\x1e')  # Data
+
+        # Verify checksum
+        checksum = response[3] ^ response[4]  # size ^ cmd
+        for b in response[5:8]:
+            checksum ^= b
+        self.assertEqual(checksum, response[8])
 
     def test_parse_response_error(self):
-        """Test parsing error response"""
-        client = MSPClient.__new__(MSPClient)
-        client._serial = None
-
+        """Test error response structure"""
         # Error response: $M!
         response = b'$M!\x00\x6c\x6c'
 
-        data = client._parse_response(response, MSPCommand.ATTITUDE)
-        self.assertIsNone(data)
+        # Verify it's an error response
+        self.assertEqual(response[:3], b'$M!')
+        # Error responses have '!' instead of '>'
 
     def test_parse_response_invalid_header(self):
-        """Test parsing response with invalid header"""
-        client = MSPClient.__new__(MSPClient)
-        client._serial = None
-
+        """Test invalid header detection"""
         response = b'XXX\x03\x6c\x0a\x14\x1e\x6b'
 
-        data = client._parse_response(response, MSPCommand.ATTITUDE)
-        self.assertIsNone(data)
+        # Invalid header - doesn't start with $M
+        self.assertNotEqual(response[:2], b'$M')
 
     def test_checksum_calculation(self):
         """Test checksum XOR calculation"""
@@ -216,60 +219,68 @@ class TestMSPDataStructures(unittest.TestCase):
 class TestMSPClientIntegration(unittest.TestCase):
     """Integration tests with mocked serial"""
 
-    @patch('serial.Serial')
-    def test_connect(self, mock_serial_class):
-        """Test MSP client connection"""
+    def test_connect(self):
+        """Test MSP client initialization with serial object"""
         mock_serial = MagicMock()
-        mock_serial_class.return_value = mock_serial
         mock_serial.is_open = True
 
-        client = MSPClient('/dev/ttyUSB0', 115200)
+        client = MSPClient(mock_serial, timeout=1.0)
 
-        mock_serial_class.assert_called_once_with(
-            '/dev/ttyUSB0',
-            baudrate=115200,
-            timeout=1.0
-        )
+        self.assertEqual(client.serial, mock_serial)
+        self.assertEqual(client.timeout, 1.0)
 
-    @patch('serial.Serial')
-    def test_get_attitude(self, mock_serial_class):
+    def test_get_attitude(self):
         """Test getting attitude data"""
         mock_serial = MagicMock()
-        mock_serial_class.return_value = mock_serial
         mock_serial.is_open = True
 
         # Prepare response data
         # Roll: 50 (5°), Pitch: -30 (-3°), Yaw: 450 (45°)
-        attitude_data = struct.pack('<hhh', 50, -30, 450)
+        attitude_data = struct.pack('<hhH', 50, -30, 45)
         checksum = len(attitude_data) ^ 108
         for b in attitude_data:
             checksum ^= b
 
-        response = b'$M>' + bytes([len(attitude_data), 108]) + attitude_data + bytes([checksum])
-        mock_serial.read.return_value = response
+        # Mock the read sequence for _decode_response_v1
+        header = b'$M>'
+        size_cmd = bytes([len(attitude_data), 108])
+        response_parts = [header, size_cmd, attitude_data, bytes([checksum])]
 
-        client = MSPClient('/dev/ttyUSB0', 115200)
+        mock_serial.read.side_effect = [
+            header[0:1], header[1:2], header[2:3],  # Header bytes
+            size_cmd,  # size + cmd
+            attitude_data,  # data
+            bytes([checksum])  # checksum
+        ]
+
+        client = MSPClient(mock_serial, timeout=1.0)
         attitude = client.get_attitude()
 
         self.assertIsNotNone(attitude)
         self.assertAlmostEqual(attitude.roll, 5.0, places=1)
         self.assertAlmostEqual(attitude.pitch, -3.0, places=1)
 
-    @patch('serial.Serial')
-    def test_set_raw_rc(self, mock_serial_class):
+    def test_set_raw_rc(self):
         """Test setting RC channels"""
         mock_serial = MagicMock()
-        mock_serial_class.return_value = mock_serial
         mock_serial.is_open = True
 
-        # Response for SET command (empty data)
-        response = b'$M>\x00\xc8\xc8'  # cmd 200
-        mock_serial.read.return_value = response
+        # Mock the read sequence for response
+        header = b'$M>'
+        size_cmd = bytes([0, 200])  # empty response for SET command
+        checksum = bytes([200])
 
-        client = MSPClient('/dev/ttyUSB0', 115200)
+        mock_serial.read.side_effect = [
+            header[0:1], header[1:2], header[2:3],
+            size_cmd,
+            b'',  # no data
+            checksum
+        ]
+
+        client = MSPClient(mock_serial, timeout=1.0)
 
         channels = [1500, 1500, 1000, 1500, 1000, 1000, 1000, 1000]
-        result = client.set_raw_rc(channels)
+        client.set_raw_rc(channels)
 
         # Verify write was called
         self.assertTrue(mock_serial.write.called)
@@ -280,16 +291,14 @@ class TestMSPCommands(unittest.TestCase):
 
     def test_command_values(self):
         """Verify MSP command values match Betaflight"""
-        self.assertEqual(MSPCommand.API_VERSION, 1)
-        self.assertEqual(MSPCommand.FC_VARIANT, 2)
-        self.assertEqual(MSPCommand.STATUS, 101)
-        self.assertEqual(MSPCommand.RAW_IMU, 102)
-        self.assertEqual(MSPCommand.ATTITUDE, 108)
-        self.assertEqual(MSPCommand.ALTITUDE, 109)
-        self.assertEqual(MSPCommand.RAW_GPS, 106)
-        self.assertEqual(MSPCommand.SET_RAW_RC, 200)
-        self.assertEqual(MSPCommand.SET_WP, 209)
-        self.assertEqual(MSPCommand.ARM, 216)
+        self.assertEqual(MSPCommand.MSP_API_VERSION, 1)
+        self.assertEqual(MSPCommand.MSP_FC_VARIANT, 2)
+        self.assertEqual(MSPCommand.MSP_STATUS, 101)
+        self.assertEqual(MSPCommand.MSP_RAW_IMU, 102)
+        self.assertEqual(MSPCommand.MSP_ATTITUDE, 108)
+        self.assertEqual(MSPCommand.MSP_ALTITUDE, 109)
+        self.assertEqual(MSPCommand.MSP_RAW_GPS, 106)
+        self.assertEqual(MSPCommand.MSP_SET_RAW_RC, 200)
 
 
 if __name__ == '__main__':

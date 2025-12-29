@@ -26,7 +26,7 @@ class TestFlightStateMachine(unittest.TestCase):
     def test_initial_state(self):
         """Test initial state is IDLE"""
         self.assertEqual(self.sm.state, FlightState.IDLE)
-        self.assertFalse(self.sm.is_flying())
+        self.assertFalse(self.sm.is_flying)
 
     # ==================== Valid Transitions ====================
 
@@ -36,7 +36,7 @@ class TestFlightStateMachine(unittest.TestCase):
 
         self.assertTrue(success)
         self.assertEqual(self.sm.state, FlightState.ARMED)
-        self.assertFalse(self.sm.is_flying())
+        self.assertFalse(self.sm.is_flying)
 
     def test_armed_to_takeoff(self):
         """Test transition from ARMED to TAKEOFF"""
@@ -45,7 +45,7 @@ class TestFlightStateMachine(unittest.TestCase):
 
         self.assertTrue(success)
         self.assertEqual(self.sm.state, FlightState.TAKEOFF)
-        self.assertTrue(self.sm.is_flying())
+        self.assertTrue(self.sm.is_flying)
 
     def test_takeoff_to_hover(self):
         """Test transition from TAKEOFF to HOVER"""
@@ -96,7 +96,7 @@ class TestFlightStateMachine(unittest.TestCase):
 
         self.assertTrue(success)
         self.assertEqual(self.sm.state, FlightState.LANDED)
-        self.assertFalse(self.sm.is_flying())
+        self.assertFalse(self.sm.is_flying)
 
     def test_landed_to_idle(self):
         """Test transition from LANDED to IDLE"""
@@ -140,13 +140,15 @@ class TestFlightStateMachine(unittest.TestCase):
         self.assertFalse(success)
         self.assertEqual(self.sm.state, FlightState.FLYING)
 
-    def test_takeoff_to_idle_invalid(self):
-        """Test cannot go from TAKEOFF to IDLE"""
+    def test_takeoff_to_idle_abort(self):
+        """Test can abort from TAKEOFF to IDLE (for takeoff abort on ground)"""
         self.sm.transition_to(FlightState.ARMED)
         self.sm.transition_to(FlightState.TAKEOFF)
         success = self.sm.transition_to(FlightState.IDLE)
 
-        self.assertFalse(success)
+        # TAKEOFF → IDLE is now valid for abort scenarios
+        self.assertTrue(success)
+        self.assertEqual(self.sm.state, FlightState.IDLE)
 
     # ==================== Emergency Transitions ====================
 
@@ -213,42 +215,46 @@ class TestFlightStateMachine(unittest.TestCase):
     # ==================== State Properties ====================
 
     def test_is_flying_states(self):
-        """Test is_flying() returns correct values"""
-        non_flying = [FlightState.IDLE, FlightState.ARMED, FlightState.LANDED, FlightState.ERROR]
+        """Test is_flying property returns correct values"""
+        # FAILSAFE is not considered flying (drone may be in emergency descent)
+        non_flying = [FlightState.IDLE, FlightState.ARMED, FlightState.LANDED,
+                      FlightState.ERROR, FlightState.FAILSAFE]
         flying = [FlightState.TAKEOFF, FlightState.HOVER, FlightState.POSITION_HOLD,
                   FlightState.FLYING, FlightState.MISSION, FlightState.RTH,
-                  FlightState.LANDING, FlightState.FAILSAFE]
+                  FlightState.LANDING]
 
         for state in non_flying:
             self.sm._state = state
-            self.assertFalse(self.sm.is_flying(), f"{state} should not be flying")
+            self.assertFalse(self.sm.is_flying, f"{state} should not be flying")
 
         for state in flying:
             self.sm._state = state
-            self.assertTrue(self.sm.is_flying(), f"{state} should be flying")
+            self.assertTrue(self.sm.is_flying, f"{state} should be flying")
 
     def test_can_arm_states(self):
-        """Test can_arm() returns correct values"""
+        """Test arming is only valid from IDLE"""
         # Can only arm from IDLE
         self.sm._state = FlightState.IDLE
-        self.assertTrue(self.sm.can_arm())
+        self.assertTrue(self.sm.can_transition_to(FlightState.ARMED))
 
         for state in [FlightState.ARMED, FlightState.FLYING, FlightState.LANDING]:
             self.sm._state = state
-            self.assertFalse(self.sm.can_arm())
+            # Cannot transition to ARMED from these states
+            self.assertFalse(self.sm.can_transition_to(FlightState.ARMED))
 
     def test_can_disarm_states(self):
-        """Test can_disarm() returns correct values"""
-        # Can disarm from ARMED, LANDED, ERROR
+        """Test disarming is only valid from certain states"""
+        # Can disarm (go to IDLE) from ARMED
         self.sm._state = FlightState.ARMED
-        self.assertTrue(self.sm.can_disarm())
+        self.assertTrue(self.sm.can_transition_to(FlightState.IDLE))
 
+        # Can disarm from LANDED
         self.sm._state = FlightState.LANDED
-        self.assertTrue(self.sm.can_disarm())
+        self.assertTrue(self.sm.can_transition_to(FlightState.IDLE))
 
         # Cannot disarm while flying
         self.sm._state = FlightState.FLYING
-        self.assertFalse(self.sm.can_disarm())
+        self.assertFalse(self.sm.can_transition_to(FlightState.IDLE))
 
     # ==================== State Status ====================
 
@@ -278,10 +284,10 @@ class TestFlightStateMachine(unittest.TestCase):
         """Test transition callbacks are called"""
         callback_called = []
 
-        def on_transition(old_state, new_state):
+        def transition_callback(old_state, new_state):
             callback_called.append((old_state, new_state))
 
-        self.sm.on_transition = on_transition
+        self.sm.on_transition(transition_callback)
 
         self.sm.transition_to(FlightState.ARMED)
 

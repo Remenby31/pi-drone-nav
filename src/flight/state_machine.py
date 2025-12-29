@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 class FlightState(Enum):
     """Flight states"""
     IDLE = auto()           # Disarmed, on ground
-    PREFLIGHT = auto()      # Pre-flight checks
+    PREFLIGHT = auto()      # Pre-flight checks (legacy)
+    PREFLIGHT_CHECK = auto()  # Running pre-flight checks before arming
     ARMED = auto()          # Armed, ready for takeoff
     TAKEOFF = auto()        # Taking off
     HOVER = auto()          # Hovering in place
@@ -31,11 +32,12 @@ class FlightState(Enum):
 
 # Valid state transitions
 VALID_TRANSITIONS: Dict[FlightState, Set[FlightState]] = {
-    FlightState.IDLE: {FlightState.PREFLIGHT, FlightState.ARMED, FlightState.ERROR},
+    FlightState.IDLE: {FlightState.PREFLIGHT, FlightState.PREFLIGHT_CHECK, FlightState.ARMED, FlightState.ERROR},
     FlightState.PREFLIGHT: {FlightState.ARMED, FlightState.IDLE, FlightState.ERROR},
+    FlightState.PREFLIGHT_CHECK: {FlightState.ARMED, FlightState.IDLE, FlightState.ERROR},
     FlightState.ARMED: {FlightState.TAKEOFF, FlightState.IDLE, FlightState.FAILSAFE, FlightState.ERROR},
     FlightState.TAKEOFF: {FlightState.HOVER, FlightState.POSITION_HOLD, FlightState.FAILSAFE,
-                          FlightState.LANDING, FlightState.ERROR},
+                          FlightState.LANDING, FlightState.IDLE, FlightState.ERROR},
     FlightState.HOVER: {FlightState.POSITION_HOLD, FlightState.FLYING, FlightState.MISSION,
                         FlightState.RTH, FlightState.LANDING, FlightState.FAILSAFE, FlightState.ERROR},
     FlightState.POSITION_HOLD: {FlightState.HOVER, FlightState.FLYING, FlightState.MISSION,

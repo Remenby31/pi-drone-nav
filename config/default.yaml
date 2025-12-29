@@ -32,6 +32,10 @@ gps:
   filter_enabled: true
   filter_samples: 5
 
+  # Fallback to MSP GPS from Betaflight if UBX GPS unavailable at startup
+  # Note: MSP GPS has no vertical velocity (vel_down = 0)
+  msp_fallback: true
+
 # Navigation settings
 navigation:
   # Position controller gains
@@ -154,3 +158,54 @@ logging:
   # Flight data logging
   flight_log_enabled: true
   flight_log_rate: 10  # Hz
+
+# Takeoff sequence settings (iNav/ArduPilot style)
+takeoff:
+  # Target altitude for takeoff (m)
+  default_altitude_m: 3.0
+
+  # Phase timing (ms)
+  spinup_time_ms: 500           # Motor spinup before climb
+  stabilize_time_ms: 1000       # Stabilization after reaching altitude
+
+  # Throttle ramping
+  initial_throttle: 0.15        # Starting throttle (below hover)
+  ramp_rate_per_sec: 0.3        # Throttle increase rate
+  max_ramp_throttle: 0.7        # Safety limit during ramp
+
+  # Liftoff detection thresholds
+  liftoff_altitude_threshold_m: 0.3    # Min altitude to confirm liftoff
+  liftoff_climb_rate_threshold_ms: 0.2 # Min climb rate to confirm
+  liftoff_timeout_ms: 5000             # Abort if no liftoff after this
+
+  # Ground effect compensation
+  ground_effect_height_m: 1.0          # Height where ground effect diminishes
+  ground_effect_throttle_boost: 0.05   # Extra throttle near ground
+
+  # Abort conditions
+  max_tilt_abort_deg: 30.0      # Abort if tilted more than this
+  altitude_loss_abort_m: 0.5    # Abort if altitude drops during climb
+
+  # Pre-flight checks
+  preflight_enabled: true
+  min_gps_satellites: 5
+  max_hdop: 3.0
+  attitude_check_max_tilt_deg: 10.0  # Must be level before takeoff
+
+# Hover throttle learning (ArduPilot MOT_THST_HOVER style)
+hover_learn:
+  enabled: true
+  time_constant_sec: 2.0        # EMA filter time constant
+
+  # Throttle bounds
+  min_hover_throttle: 0.2
+  max_hover_throttle: 0.8
+
+  # Learning conditions (must be met to update estimate)
+  min_altitude_m: 1.0           # Must be above ground
+  max_climb_rate_ms: 0.5        # Must be hovering (low climb rate)
+  max_horizontal_speed_ms: 1.0  # Must not be maneuvering
+
+  # Persistence
+  save_on_disarm: true
+  save_file: "hover_throttle.json"

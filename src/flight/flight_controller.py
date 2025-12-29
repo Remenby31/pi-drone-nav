@@ -10,6 +10,9 @@ from typing import Optional, Tuple
 import logging
 
 from .state_machine import FlightStateMachine, FlightState
+from .takeoff_controller import TakeoffController, TakeoffPhase
+from .preflight_checks import PreflightChecker, PreflightResult
+from .hover_throttle_learner import HoverThrottleLearner
 from ..drivers.msp import MSPClient, MSPError
 from ..drivers.gps_ubx import GPSDriver, GPSFix
 from ..drivers.serial_manager import SerialManager
@@ -17,7 +20,10 @@ from ..navigation.position_controller import PositionControllerGPS
 from ..navigation.velocity_controller import VelocityController, angles_to_rc
 from ..navigation.altitude_controller import AltitudeController
 from ..navigation.waypoint_navigator import WaypointNavigator, Mission
+from ..navigation.heading_estimator import HeadingEstimator
 from ..config import get_config
+
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,7 @@ class FlightController:
         self.pos_controller = PositionControllerGPS()
         self.vel_controller = VelocityController()
         self.alt_controller = AltitudeController()
+        self.heading_estimator = HeadingEstimator()
         self.waypoint_nav: Optional[WaypointNavigator] = None
 
         # Control loop
@@ -70,12 +77,23 @@ class FlightController:
         self._target_altitude = 0.0
         self._current_yaw = 0.0
 
+        # GPS source tracking
+        self._use_msp_gps = False  # True if using GPS via MSP (fallback)
+
         # RC output
         self._rc_channels = [1500] * 8
 
         # Telemetry
         self._last_gps_fix: Optional[GPSFix] = None
         self._last_attitude = None
+
+        # Takeoff system (initialized in initialize())
+        self.takeoff_controller: Optional[TakeoffController] = None
+        self.preflight_checker: Optional[PreflightChecker] = None
+        self.hover_learner: Optional[HoverThrottleLearner] = None
+
+        # Preflight state
+        self._preflight_result: Optional[PreflightResult] = None
 
     def initialize(self) -> bool:
         """
@@ -107,8 +125,8 @@ class FlightController:
                     logger.error("MSP connection failed")
                     return False
 
-                # Initialize GPS (on separate port)
-                # TODO: Initialize GPS driver
+                # Initialize GPS - try UBX first, fallback to MSP if enabled
+                self._init_gps()
 
             else:
                 # Simulation mode
@@ -118,12 +136,75 @@ class FlightController:
             # Initialize waypoint navigator
             self.waypoint_nav = WaypointNavigator(self.pos_controller)
 
+            # Initialize takeoff system
+            self.preflight_checker = PreflightChecker(self.config.takeoff)
+            self.hover_learner = HoverThrottleLearner(self.config.hover_learn)
+            self.takeoff_controller = TakeoffController(
+                self.config.takeoff, self.alt_controller
+            )
+
+            # Setup takeoff callbacks
+            self.takeoff_controller.on_complete(self._on_takeoff_complete)
+            self.takeoff_controller.on_abort(self._on_takeoff_abort)
+
             logger.info("Flight controller initialized successfully")
             return True
 
         except Exception as e:
             logger.error(f"Initialization failed: {e}")
             return False
+
+    def _init_gps(self):
+        """
+        Initialize GPS source with fallback logic.
+
+        Priority:
+        1. UBX GPS on dedicated serial port (if available)
+        2. MSP GPS from Betaflight FC (if msp_fallback enabled)
+        """
+        import serial
+
+        gps_config = self.config.gps
+
+        # Try to initialize UBX GPS
+        try:
+            gps_serial = serial.Serial(
+                port=gps_config.port,
+                baudrate=gps_config.baudrate,
+                timeout=0.1
+            )
+            self.gps = GPSDriver(gps_serial, update_rate_hz=gps_config.update_rate_hz)
+
+            if self.gps.configure():
+                self.gps.start()
+                logger.info(f"UBX GPS initialized on {gps_config.port}")
+                self._use_msp_gps = False
+                return
+            else:
+                logger.warning("UBX GPS configuration failed")
+                self.gps.close()
+                self.gps = None
+
+        except serial.SerialException as e:
+            logger.warning(f"UBX GPS not available on {gps_config.port}: {e}")
+            self.gps = None
+
+        # Fallback to MSP GPS if enabled
+        if gps_config.msp_fallback and self.msp:
+            try:
+                # Test if Betaflight has GPS data
+                gps_fix = self.msp.get_gps_as_fix()
+                if gps_fix is not None:
+                    self._use_msp_gps = True
+                    logger.info("Using MSP GPS from Betaflight (fallback mode)")
+                    logger.warning("MSP GPS: vel_down not available, vertical velocity will be 0")
+                    return
+                else:
+                    logger.warning("MSP GPS: No GPS data from Betaflight")
+            except Exception as e:
+                logger.warning(f"MSP GPS fallback failed: {e}")
+
+        logger.error("No GPS source available!")
 
     def _init_simulation(self):
         """Initialize simulation mode"""
@@ -160,6 +241,32 @@ class FlightController:
         def on_failsafe():
             logger.warning("FAILSAFE - Returning control to Betaflight")
             # Stop sending RC commands to let Betaflight GPS Rescue take over
+
+    def _on_takeoff_complete(self):
+        """Called when takeoff completes successfully"""
+        logger.info("Takeoff complete, transitioning to position hold")
+
+        # Update altitude controller with learned hover throttle if available
+        if self.hover_learner and self.takeoff_controller:
+            throttle_at_liftoff = self.takeoff_controller.state.throttle_at_liftoff
+            if throttle_at_liftoff > 0:
+                # Use liftoff throttle as initial estimate for hover learning
+                self.hover_learner.reset(throttle_at_liftoff)
+                self.alt_controller.calibrate_hover_throttle(throttle_at_liftoff)
+                logger.info(f"Initial hover throttle estimate: {throttle_at_liftoff:.2f}")
+
+        self.state_machine.transition_to(FlightState.POSITION_HOLD)
+
+    def _on_takeoff_abort(self, reason: str):
+        """Called when takeoff is aborted"""
+        logger.warning(f"Takeoff aborted: {reason}")
+
+        # Transition to landing or idle depending on altitude
+        if self.alt_controller.current_altitude > 0.5:
+            self.state_machine.transition_to(FlightState.LANDING)
+        else:
+            self._armed = False
+            self.state_machine.transition_to(FlightState.IDLE)
 
     def start(self):
         """Start the control loop"""
@@ -241,28 +348,57 @@ class FlightController:
         if self.simulation:
             return  # Use simulated data
 
-        if self.gps:
+        # Read GPS - either from UBX driver or MSP fallback
+        fix = None
+        if self._use_msp_gps and self.msp:
+            # Get GPS from Betaflight via MSP
+            fix = self.msp.get_gps_as_fix()
+        elif self.gps:
+            # Get GPS from UBX driver
             fix = self.gps.get_fix()
-            if fix.has_fix:
-                self._last_gps_fix = fix
-                self.pos_controller.update_position(
-                    fix.latitude, fix.longitude, fix.altitude_msl
-                )
-                self.vel_controller.set_current_velocity(
-                    fix.vel_north, fix.vel_east, fix.vel_down
-                )
-                self.alt_controller.update_altitude_from_gps(
-                    fix.altitude_msl, fix.vel_down
+
+        if fix and fix.has_fix:
+            self._last_gps_fix = fix
+            self.pos_controller.update_position(
+                fix.latitude, fix.longitude, fix.altitude_msl
+            )
+            self.vel_controller.set_current_velocity(
+                fix.vel_north, fix.vel_east, fix.vel_down
+            )
+            self.alt_controller.update_altitude_from_gps(
+                fix.altitude_msl, fix.vel_down
+            )
+
+            # Update waypoint navigator with current position/velocity
+            if self.waypoint_nav:
+                self.waypoint_nav.update_position(
+                    fix.latitude, fix.longitude, fix.altitude_msl,
+                    fix.vel_north, fix.vel_east
                 )
 
         if self.msp:
             try:
                 attitude = self.msp.get_attitude()
                 self._last_attitude = attitude
-                self._current_yaw = attitude.yaw
-                self.vel_controller.set_current_yaw(
-                    self._current_yaw * 3.14159 / 180.0
-                )
+
+                # Fuse gyro heading with GPS course-over-ground
+                if fix and fix.has_fix:
+                    ground_speed = math.sqrt(fix.vel_north**2 + fix.vel_east**2)
+                    gps_heading_rad = math.radians(fix.heading) if hasattr(fix, 'heading') else 0.0
+
+                    # Get fused heading
+                    fused_yaw_rad = self.heading_estimator.update(
+                        gyro_yaw_rad=math.radians(attitude.yaw),
+                        gps_cog_rad=gps_heading_rad,
+                        ground_speed=ground_speed
+                    )
+                    self._current_yaw = math.degrees(fused_yaw_rad)
+                else:
+                    # No GPS, use gyro only
+                    self._current_yaw = attitude.yaw
+                    fused_yaw_rad = math.radians(attitude.yaw)
+
+                self.vel_controller.set_current_yaw(fused_yaw_rad)
 
                 # Also read altitude from FC if available
                 altitude = self.msp.get_altitude()
@@ -293,26 +429,118 @@ class FlightController:
                 self.state_machine.trigger_failsafe("Landing timeout")
 
     def _update_takeoff(self, dt: float):
-        """Update takeoff sequence"""
-        # Set target altitude
-        self.alt_controller.set_target_altitude(self._target_altitude)
+        """Update takeoff sequence using TakeoffController"""
+        if not self.takeoff_controller:
+            # Fallback to simple takeoff if controller not available
+            self.alt_controller.set_target_altitude(self._target_altitude)
+            throttle = self.alt_controller.update(dt)
+            self._rc_channels = [1500, 1500, int(throttle * 1000 + 1000), 1500, 1500, 1500, 1500, 1500]
+            if self.alt_controller.current_altitude >= self._target_altitude - 0.5:
+                self.state_machine.transition_to(FlightState.POSITION_HOLD)
+            return
 
-        # Calculate throttle
-        throttle = self.alt_controller.update(dt)
+        # Get current sensor data
+        altitude = self.alt_controller.current_altitude
+        climb_rate = self.alt_controller.current_climb_rate
+        roll = self._last_attitude.roll if self._last_attitude else 0
+        pitch = self._last_attitude.pitch if self._last_attitude else 0
 
-        # Keep level (no position control yet)
-        self._rc_channels = [1500, 1500, int(throttle * 1000 + 1000), 1500, 1500, 1500, 1500, 1500]
+        # Update takeoff controller
+        throttle = self.takeoff_controller.update(
+            dt=dt,
+            altitude_m=altitude,
+            climb_rate_ms=climb_rate,
+            roll_deg=roll,
+            pitch_deg=pitch
+        )
 
-        # Check if reached altitude
-        if self.alt_controller.current_altitude >= self._target_altitude - 0.5:
-            logger.info("Takeoff complete")
-            self.state_machine.transition_to(FlightState.POSITION_HOLD)
+        # Keep level (no position control during takeoff)
+        # AUX channels: AUX1=armed (1800), AUX2=mode (1800)
+        self._rc_channels = [
+            1500,                           # Roll - center
+            1500,                           # Pitch - center
+            int(throttle * 1000 + 1000),    # Throttle
+            1500,                           # Yaw - center
+            1800,                           # AUX1 - armed
+            1800,                           # AUX2 - flight mode
+            1500,                           # AUX3
+            1500                            # AUX4
+        ]
+
+        # Phase transitions are handled by callbacks
 
     def _update_position_hold(self, dt: float):
-        """Update position hold"""
+        """Update position hold with hover throttle learning"""
         # Position → Velocity
         vel_n, vel_e, vel_d = self.pos_controller.update()
         self.vel_controller.set_target_velocity(vel_n, vel_e, vel_d)
+
+        # Velocity → Attitude
+        attitude_cmd = self.vel_controller.update(dt)
+
+        # Altitude → Throttle
+        throttle = self.alt_controller.update(dt)
+
+        # Update hover throttle learner
+        if self.hover_learner and self._last_gps_fix:
+            # Calculate horizontal speed
+            horizontal_speed = 0.0
+            if hasattr(self._last_gps_fix, 'ground_speed'):
+                horizontal_speed = self._last_gps_fix.ground_speed
+            elif hasattr(self._last_gps_fix, 'vel_north') and hasattr(self._last_gps_fix, 'vel_east'):
+                horizontal_speed = (self._last_gps_fix.vel_north**2 +
+                                    self._last_gps_fix.vel_east**2) ** 0.5
+
+            learned = self.hover_learner.update(
+                dt=dt,
+                throttle=throttle,
+                altitude_m=self.alt_controller.current_altitude,
+                climb_rate_ms=self.alt_controller.current_climb_rate,
+                horizontal_speed_ms=horizontal_speed,
+                is_position_hold=True
+            )
+
+            if learned:
+                # Update altitude controller with learned value
+                self.alt_controller.hover_throttle = self.hover_learner.hover_throttle
+
+        # Convert to RC
+        # AUX channels: AUX1=armed (1800), AUX2=mode (1800)
+        self._rc_channels = list(angles_to_rc(
+            attitude_cmd.roll_deg,
+            attitude_cmd.pitch_deg,
+            throttle,
+            0.0,  # No yaw rate for now
+            self.config.navigation.max_bank_angle_deg
+        )) + [1800, 1800, 1500, 1500]
+
+    def _update_flying(self, dt: float):
+        """Update flying to waypoint"""
+        # Same as position hold but with waypoint target
+        self._update_position_hold(dt)
+
+    def _update_mission(self, dt: float):
+        """Update mission execution with L1 path following"""
+        if not self.waypoint_nav:
+            self._update_position_hold(dt)
+            return
+
+        # Get navigation output from waypoint navigator
+        velocity_target, altitude_target, mission_active = self.waypoint_nav.update(dt)
+
+        if not mission_active:
+            # Mission completed or aborted
+            if self.waypoint_nav.state.name == 'COMPLETED':
+                self.state_machine.transition_to(FlightState.POSITION_HOLD)
+            return
+
+        # Use L1 velocity target directly
+        self.vel_controller.set_target_velocity(
+            velocity_target.x, velocity_target.y, 0.0
+        )
+
+        # Use ramped altitude from waypoint navigator
+        self.alt_controller.set_target_altitude(altitude_target)
 
         # Velocity → Attitude
         attitude_cmd = self.vel_controller.update(dt)
@@ -328,18 +556,6 @@ class FlightController:
             0.0,  # No yaw rate for now
             self.config.navigation.max_bank_angle_deg
         )) + [1500, 1500, 1500, 1500]
-
-    def _update_flying(self, dt: float):
-        """Update flying to waypoint"""
-        # Same as position hold but with waypoint target
-        self._update_position_hold(dt)
-
-    def _update_mission(self, dt: float):
-        """Update mission execution"""
-        if self.waypoint_nav:
-            self.waypoint_nav.update()
-
-        self._update_position_hold(dt)
 
     def _update_landing(self, dt: float):
         """Update landing sequence"""
@@ -383,9 +599,29 @@ class FlightController:
     # ==================== Public API ====================
 
     def arm(self) -> bool:
-        """Arm the drone"""
+        """Arm the drone with pre-flight checks"""
         if self.state_machine.state != FlightState.IDLE:
             return False
+
+        # Run pre-flight checks if enabled
+        if self.config.takeoff.preflight_enabled and self.preflight_checker:
+            logger.info("Running pre-flight checks...")
+            self.state_machine.transition_to(FlightState.PREFLIGHT_CHECK)
+
+            self._preflight_result = self.preflight_checker.run_checks(
+                msp=self.msp,
+                gps_fix=self._last_gps_fix,
+                attitude=self._last_attitude
+            )
+
+            if not self._preflight_result.passed:
+                logger.error(f"Pre-flight checks failed: {self._preflight_result.blocking_failures}")
+                self.state_machine.transition_to(FlightState.IDLE)
+                return False
+
+            # Log warnings
+            for warning in self._preflight_result.warnings:
+                logger.warning(f"Pre-flight warning: {warning}")
 
         logger.info("Arming...")
         # TODO: Send arm command to Betaflight
@@ -402,16 +638,20 @@ class FlightController:
             logger.warning("Cannot disarm while flying")
             return False
 
-    def takeoff(self, altitude: float = 3.0) -> bool:
+    def takeoff(self, altitude: float = None) -> bool:
         """
-        Initiate takeoff
+        Initiate takeoff with improved sequence
 
         Args:
-            altitude: Target altitude in meters
+            altitude: Target altitude in meters (default from config)
         """
         if self.state_machine.state != FlightState.ARMED:
             logger.error("Must be armed to takeoff")
             return False
+
+        # Use config default if not specified
+        if altitude is None:
+            altitude = self.config.takeoff.default_altitude_m
 
         self._target_altitude = altitude
 
@@ -427,6 +667,14 @@ class FlightController:
                 self._last_gps_fix.longitude,
                 self._last_gps_fix.altitude_msl
             )
+            # Set ground reference for altitude controller
+            self.alt_controller.set_ground_reference(
+                self.alt_controller.current_altitude
+            )
+
+        # Start takeoff controller
+        if self.takeoff_controller:
+            self.takeoff_controller.start(altitude)
 
         return self.state_machine.transition_to(FlightState.TAKEOFF)
 
@@ -492,13 +740,14 @@ class FlightController:
 
     def get_telemetry(self) -> dict:
         """Get current telemetry data"""
-        return {
+        telemetry = {
             'state': self.state_machine.get_status(),
             'position': {
                 'lat': self._last_gps_fix.latitude if self._last_gps_fix else 0,
                 'lon': self._last_gps_fix.longitude if self._last_gps_fix else 0,
                 'alt': self.alt_controller.current_altitude,
-                'satellites': self._last_gps_fix.num_satellites if self._last_gps_fix else 0
+                'satellites': self._last_gps_fix.num_satellites if self._last_gps_fix else 0,
+                'gps_source': 'msp' if self._use_msp_gps else 'ubx'
             },
             'attitude': {
                 'roll': self._last_attitude.roll if self._last_attitude else 0,
@@ -506,12 +755,37 @@ class FlightController:
                 'yaw': self._current_yaw
             },
             'navigation': self.waypoint_nav.get_status() if self.waypoint_nav else None,
-            'armed': self._armed
+            'armed': self._armed,
+            'hover_throttle': self.alt_controller.hover_throttle
         }
+
+        # Add takeoff status if active
+        if self.takeoff_controller and self.takeoff_controller.is_active:
+            telemetry['takeoff'] = self.takeoff_controller.get_status()
+
+        # Add hover learner status
+        if self.hover_learner:
+            telemetry['hover_learner'] = self.hover_learner.get_status()
+
+        # Add preflight result if available
+        if self._preflight_result:
+            telemetry['preflight'] = {
+                'passed': self._preflight_result.passed,
+                'checks': [c.name for c in self._preflight_result.checks],
+                'failures': self._preflight_result.blocking_failures,
+                'warnings': self._preflight_result.warnings
+            }
+
+        return telemetry
 
     def shutdown(self):
         """Shutdown flight controller"""
         logger.info("Shutting down flight controller...")
+
+        # Save learned hover throttle
+        if self.hover_learner:
+            self.hover_learner.save()
+
         self.stop()
 
         if self.gps:

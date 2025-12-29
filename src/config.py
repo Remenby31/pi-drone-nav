@@ -39,7 +39,10 @@ class GPSConfig:
 
     # Position filtering
     use_kalman_filter: bool = True
-    position_filter_hz: float = 5.0     # Low-pass filter cutoff
+    position_filter_hz: float = 5.0     # Low-pass filter
+
+    # Fallback to MSP GPS (from Betaflight FC) if UBX GPS unavailable at startup
+    msp_fallback: bool = True
 
 
 @dataclass
@@ -81,6 +84,28 @@ class NavigationConfig:
 
     # Position hold
     position_hold_radius_m: float = 2.0  # Target precision
+
+    # L1 Controller (path following)
+    l1_period: float = 20.0             # L1 time constant (seconds, 15-25)
+    l1_damping: float = 0.75            # Damping ratio (0.7-0.85)
+    xte_i_gain: float = 0.1             # Cross-track error integrator gain
+
+    # Turn anticipation
+    enable_turn_anticipation: bool = True
+    min_turn_radius_m: float = 5.0      # Minimum turn radius
+
+    # Speed management
+    enable_speed_adaptation: bool = True
+    turn_speed_reduction: float = 0.5   # Min speed factor in sharp turns (0.5 = 50%)
+    max_decel_mss: float = 2.0          # Max deceleration for speed reduction
+
+    # Altitude ramping
+    enable_altitude_ramp: bool = True
+
+    # Heading fusion (GPS course-over-ground + gyro)
+    enable_heading_fusion: bool = True
+    heading_gps_weight: float = 0.1     # GPS heading weight in fusion
+    heading_min_speed_ms: float = 3.0   # Min speed for GPS heading validity
 
 
 @dataclass
@@ -156,6 +181,61 @@ class SimulationConfig:
 
 
 @dataclass
+class TakeoffConfig:
+    """Takeoff sequence configuration (iNav/ArduPilot style)"""
+
+    # Target altitude
+    default_altitude_m: float = 3.0
+
+    # Phase timing
+    spinup_time_ms: int = 500           # Motor spinup duration
+    stabilize_time_ms: int = 1000       # Post-climb stabilization
+
+    # Throttle ramping
+    initial_throttle: float = 0.15      # Starting throttle (below hover)
+    ramp_rate_per_sec: float = 0.3      # Throttle increase rate
+    max_ramp_throttle: float = 0.7      # Max throttle during ramp (safety)
+
+    # Liftoff detection
+    liftoff_altitude_threshold_m: float = 0.3    # Min altitude to confirm liftoff
+    liftoff_climb_rate_threshold_ms: float = 0.2 # Min climb rate to confirm
+    liftoff_timeout_ms: int = 5000      # Abort if no liftoff
+
+    # Ground effect compensation
+    ground_effect_height_m: float = 1.0   # Height where ground effect diminishes
+    ground_effect_throttle_boost: float = 0.05  # Extra throttle near ground
+
+    # Abort conditions
+    max_tilt_abort_deg: float = 30.0    # Abort if tilted too much
+    altitude_loss_abort_m: float = 0.5  # Abort if losing altitude during climb
+
+    # Pre-flight checks
+    preflight_enabled: bool = True
+    min_gps_satellites: int = 5
+    max_hdop: float = 3.0
+    attitude_check_max_tilt_deg: float = 10.0  # Must be level before takeoff
+
+
+@dataclass
+class HoverLearnConfig:
+    """Hover throttle learning configuration (ArduPilot MOT_THST_HOVER style)"""
+
+    enabled: bool = True
+    time_constant_sec: float = 2.0      # EMA filter time constant
+    min_hover_throttle: float = 0.2
+    max_hover_throttle: float = 0.8
+
+    # Learning conditions
+    min_altitude_m: float = 1.0         # Must be above this to learn
+    max_climb_rate_ms: float = 0.5      # Must be hovering (low vertical speed)
+    max_horizontal_speed_ms: float = 1.0  # Must be near stationary
+
+    # Persistence
+    save_on_disarm: bool = True
+    save_file: str = "hover_throttle.json"
+
+
+@dataclass
 class Config:
     """Main configuration container"""
 
@@ -166,6 +246,8 @@ class Config:
     failsafe: FailsafeConfig = field(default_factory=FailsafeConfig)
     interface: InterfaceConfig = field(default_factory=InterfaceConfig)
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
+    takeoff: TakeoffConfig = field(default_factory=TakeoffConfig)
+    hover_learn: HoverLearnConfig = field(default_factory=HoverLearnConfig)
 
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "Config":
@@ -223,7 +305,8 @@ class Config:
         """Save current configuration to YAML file"""
         data = {}
         for section_name in ['serial', 'gps', 'navigation', 'altitude',
-                            'failsafe', 'interface', 'simulation']:
+                            'failsafe', 'interface', 'simulation',
+                            'takeoff', 'hover_learn']:
             section = getattr(self, section_name)
             data[section_name] = {k: v for k, v in section.__dict__.items()}
 
