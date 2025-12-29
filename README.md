@@ -124,7 +124,7 @@ pip install -e .
 source .venv/bin/activate
 
 # Run with CLI interface
-python -m src.main --usb /dev/ttyACM0
+python -m src.main --cli --usb /dev/ttyACM0
 ```
 
 #### Available Commands
