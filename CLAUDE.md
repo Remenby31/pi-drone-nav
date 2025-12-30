@@ -972,11 +972,30 @@ curl http://192.168.1.114:8080/api/status
 ```
 
 ### Points de contrôle
-- [ ] Drone sur glissière, hélices montées
+- [ ] Drone attaché avec ficelle (plus libre qu'une glissière)
+- [ ] Hélices montées
 - [ ] Batterie chargée (>14.8V pour 4S)
 - [ ] GPS fix (>5 sats)
 - [ ] Serveur démarré et connecté
 - [ ] Zone dégagée
+
+### TODO - Prochain test (1er Jan 2025)
+
+**Changement de méthode** : Utiliser une **ficelle** au lieu d'une glissière.
+- Le drone sera plus libre de ses mouvements
+- Moins de risque de blocage mécanique
+- Permet de tester les corrections d'attitude
+
+**Mission à tester** : `Test Hover 1m`
+1. Takeoff → 1m
+2. Hover 3s
+3. Land
+
+**Vérifications avant test** :
+- [ ] hover_throttle = 0.5 (pas 0.2!)
+- [ ] Flight logging actif
+- [ ] Ficelle assez longue (~2m)
+- [ ] Point d'attache solide au-dessus du drone
 
 ### Paramètres clés
 | Paramètre | Valeur | Fichier |
