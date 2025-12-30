@@ -665,6 +665,18 @@ ACC_SCALE updated in `altitude_controller.py:345`
 
 ---
 
+## Raspberry Pi Connection
+
+```
+IP: 192.168.1.80
+User: drone
+Password: drone
+```
+
+SSH: `ssh drone@192.168.1.80`
+
+---
+
 ## TODO - Test Glissière (Prochaine étape)
 
 ### Objectif
@@ -684,18 +696,22 @@ Test sur glissière verticale: décollage → hover 2m → atterrissage
 
 ### Commandes
 ```bash
-# Démarrer serveur
+# SSH vers Raspberry
+ssh drone@192.168.1.80
+
+# Sur le Raspberry: Démarrer serveur
+cd ~/pi_drone_nav && git pull
 python -m src.server.main --usb /dev/ttyACM0 -v
 
-# Lancer mission
-curl -X POST http://localhost:8080/api/missions/3f6cebcc-6508-4cd1-9d7d-dc195736f38b/start
+# Depuis PC: Lancer mission
+curl -X POST http://192.168.1.80:8080/api/missions/3f6cebcc-6508-4cd1-9d7d-dc195736f38b/start
 
 # ARRÊT D'URGENCE
-curl -X POST http://localhost:8080/api/missions/active/stop
+curl -X POST http://192.168.1.80:8080/api/missions/active/stop
 
 # Status
-curl http://localhost:8080/api/health
-curl http://localhost:8080/api/missions/active
+curl http://192.168.1.80:8080/api/health
+curl http://192.168.1.80:8080/api/missions/active
 ```
 
 ### Points de contrôle
