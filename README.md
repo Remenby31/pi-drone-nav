@@ -139,18 +139,23 @@ pidrone logs -f             # Follow server logs
 ### Server Commands
 
 ```bash
-# Start server (foreground)
+# Start server with auto-detection (default)
+pidrone-server -v
+
+# Start with specific USB port (disables auto-detection)
 pidrone-server --usb /dev/ttyACM0
 
 # Start in simulation mode
 pidrone-server --simulate
 
-# Custom port
+# Custom API port
 pidrone-server --port 9000
 
 # With verbose logging
 pidrone-server -v --log-file /var/log/pidrone.log
 ```
+
+**Auto-detection**: By default, the server scans USB ports and tests MSP communication to find Betaflight. Use `--usb` or `--uart` to disable auto-detection and use a specific port.
 
 ### REST API Endpoints
 
@@ -173,6 +178,10 @@ pidrone-server -v --log-file /var/log/pidrone.log
 | **Diagnostics** |||
 | `GET` | `/api/diagnostics` | Full system diagnostics |
 | `POST` | `/api/test/{component}` | Run diagnostic test |
+| **Serial Ports** |||
+| `GET` | `/api/ports` | List available ports |
+| `POST` | `/api/ports/connect` | Connect to port (or auto-detect if no body) |
+| `POST` | `/api/ports/disconnect` | Disconnect current port |
 
 ## Mission Format (v1.0)
 

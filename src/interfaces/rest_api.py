@@ -265,6 +265,97 @@ class APIServer:
 
             return jsonify({'error': f'Invalid action index {index}'}), 400
 
+        # ==================== Serial Ports ====================
+
+        @self.app.route('/api/ports', methods=['GET'])
+        def list_ports():
+            """
+            List available serial ports
+
+            Returns:
+                {
+                    "ports": [...],          # All available ports
+                    "betaflight_ports": [...], # Ports matching Betaflight signature
+                    "current_port": str|null   # Currently connected port
+                }
+            """
+            from ..drivers.serial_manager import SerialManager
+
+            all_ports = SerialManager.list_available_ports()
+            bf_ports = SerialManager.find_betaflight_ports()
+
+            current = None
+            if self.fc.serial_manager:
+                current = self.fc.serial_manager.current_port
+
+            return jsonify({
+                'ports': all_ports,
+                'betaflight_ports': bf_ports,
+                'current_port': current
+            })
+
+        @self.app.route('/api/ports/connect', methods=['POST'])
+        def connect_port():
+            """
+            Connect to a specific serial port
+
+            Request body: {"port": "/dev/ttyACM0"} or {} for auto-detect
+
+            Returns:
+                {"success": true, "port": str} on success
+                {"error": str} on failure
+            """
+            data = request.get_json() or {}
+            port = data.get('port')
+
+            if not self.fc.serial_manager:
+                return jsonify({'error': 'Serial manager not initialized'}), 500
+
+            # Check if armed - don't allow port change while armed
+            if self.fc._armed:
+                return jsonify({'error': 'Cannot change port while armed'}), 409
+
+            # Disconnect current connection
+            self.fc.serial_manager.disconnect()
+
+            if port:
+                # Connect to specific port
+                if self.fc.serial_manager.connect(port):
+                    # Re-initialize MSP
+                    if self.fc.msp.connect():
+                        return jsonify({'success': True, 'port': port})
+                    else:
+                        return jsonify({'error': 'MSP handshake failed'}), 500
+                else:
+                    return jsonify({'error': f'Failed to connect to {port}'}), 400
+            else:
+                # Auto-detect
+                if self.fc.serial_manager.auto_detect_and_connect():
+                    connected_port = self.fc.serial_manager.current_port
+                    # Re-initialize MSP
+                    if self.fc.msp.connect():
+                        return jsonify({
+                            'success': True,
+                            'port': connected_port,
+                            'auto_detected': True
+                        })
+                    else:
+                        return jsonify({'error': 'MSP handshake failed'}), 500
+                else:
+                    return jsonify({'error': 'Auto-detection failed'}), 400
+
+        @self.app.route('/api/ports/disconnect', methods=['POST'])
+        def disconnect_port():
+            """Disconnect from current serial port"""
+            if not self.fc.serial_manager:
+                return jsonify({'error': 'Serial manager not initialized'}), 500
+
+            if self.fc._armed:
+                return jsonify({'error': 'Cannot disconnect while armed'}), 409
+
+            self.fc.serial_manager.disconnect()
+            return jsonify({'success': True})
+
         # ==================== Configuration ====================
 
         @self.app.route('/api/config', methods=['GET'])

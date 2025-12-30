@@ -25,6 +25,9 @@ class SerialConfig:
     usb_port: str = "/dev/ttyACM0"
     use_usb: bool = False
 
+    # Auto-detection: scan ports and test MSP response
+    auto_detect: bool = True
+
 
 @dataclass
 class GPSConfig:

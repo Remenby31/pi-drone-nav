@@ -118,7 +118,15 @@ class FlightController:
                     prefer_usb=self.config.serial.use_usb
                 )
 
-                if not self.serial_manager.connect():
+                # Auto-detect or use configured ports
+                if self.config.serial.auto_detect:
+                    logger.info("Auto-detecting Betaflight port...")
+                    if not self.serial_manager.auto_detect_and_connect():
+                        logger.warning("Auto-detect failed, trying configured ports...")
+                        if not self.serial_manager.connect():
+                            logger.error("Failed to connect to flight controller")
+                            return False
+                elif not self.serial_manager.connect():
                     logger.error("Failed to connect to flight controller")
                     return False
 

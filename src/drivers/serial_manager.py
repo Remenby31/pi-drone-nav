@@ -207,7 +207,7 @@ class SerialManager:
         Find potential Betaflight USB ports
 
         Returns:
-            List of port device paths
+            List of port device paths (sorted: ACM0, ACM1, ...)
         """
         ports = []
 
@@ -221,7 +221,86 @@ class SerialManager:
             if 'ACM' in port.device or 'USB' in port.device:
                 ports.append(port.device)
 
-        return ports
+        # Sort for deterministic order
+        return sorted(ports)
+
+    def auto_detect_and_connect(self, timeout: float = 1.0) -> bool:
+        """
+        Auto-detect Betaflight port by testing MSP communication
+
+        Scans all potential ports and tries to get a valid MSP response.
+
+        Args:
+            timeout: Timeout per port test in seconds
+
+        Returns:
+            True if a valid Betaflight port was found and connected
+        """
+        candidates = self.find_betaflight_ports()
+
+        if not candidates:
+            logger.warning("No potential Betaflight ports found")
+            return False
+
+        logger.info(f"Auto-detecting Betaflight on {len(candidates)} port(s): {candidates}")
+
+        for port in candidates:
+            logger.debug(f"Testing port {port}...")
+
+            try:
+                # Try to connect
+                test_serial = serial.Serial(
+                    port=port,
+                    baudrate=self.baudrate,
+                    timeout=timeout,
+                    write_timeout=timeout
+                )
+
+                # Send MSP_API_VERSION request (code 1)
+                # MSP v1 frame: $M< + length + cmd + crc
+                msp_request = bytes([ord('$'), ord('M'), ord('<'), 0, 1, 1])
+                test_serial.write(msp_request)
+                test_serial.flush()
+
+                # Wait for response
+                time.sleep(0.1)
+
+                # Read response - expect $M> header
+                response = test_serial.read(32)
+                test_serial.close()
+
+                if len(response) >= 3 and response[0:3] == b'$M>':
+                    logger.info(f"✓ Betaflight detected on {port}")
+
+                    # Now do actual connection
+                    with self._lock:
+                        self._serial = serial.Serial(
+                            port=port,
+                            baudrate=self.baudrate,
+                            timeout=self.timeout,
+                            write_timeout=self.timeout
+                        )
+                        self._current_port = port
+                        self._connected = True
+
+                    # Notify callbacks
+                    for callback in self._connect_callbacks:
+                        try:
+                            callback(port)
+                        except Exception as e:
+                            logger.error(f"Connect callback error: {e}")
+
+                    return True
+                else:
+                    logger.debug(f"  {port}: No valid MSP response")
+
+            except serial.SerialException as e:
+                logger.debug(f"  {port}: {e}")
+            except Exception as e:
+                logger.debug(f"  {port}: Unexpected error: {e}")
+
+        logger.error("Auto-detection failed: no Betaflight port found")
+        return False
 
     @classmethod
     def list_available_ports(cls) -> List[dict]:

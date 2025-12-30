@@ -144,10 +144,12 @@ def main():
 
     if args.uart:
         config.serial.port = args.uart
+        config.serial.auto_detect = False  # Explicit port disables auto-detect
 
     if args.usb:
         config.serial.usb_port = args.usb
         config.serial.use_usb = True
+        config.serial.auto_detect = False  # Explicit port disables auto-detect
 
     if args.gps_port:
         config.gps.port = args.gps_port

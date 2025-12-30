@@ -702,6 +702,67 @@ Password: drone
 
 SSH: `ssh drone@192.168.1.80`
 
+---
+
+## Auto-détection Port USB (30 Dec 2025)
+
+### Comportement au démarrage
+
+Par défaut, le serveur **auto-détecte** le port Betaflight :
+
+```bash
+# Auto-détection (défaut)
+python -m src.server.main -v
+
+# Port explicite (désactive auto-détection)
+python -m src.server.main --usb /dev/ttyACM0 -v
+```
+
+L'auto-détection :
+1. Scanne les ports `/dev/ttyACM*`, `/dev/ttyUSB*` et VID 0x0483 (STM)
+2. Pour chaque port, envoie `MSP_API_VERSION` et attend `$M>`
+3. Se connecte au premier qui répond
+
+### API REST pour les ports
+
+| Endpoint | Méthode | Description |
+|----------|---------|-------------|
+| `/api/ports` | GET | Liste ports disponibles + port actuel |
+| `/api/ports/connect` | POST | Reconnexion à chaud |
+| `/api/ports/disconnect` | POST | Déconnecter |
+
+**Exemples :**
+```bash
+# Lister les ports
+curl http://192.168.1.80:8080/api/ports
+
+# Auto-détecter et connecter
+curl -X POST http://192.168.1.80:8080/api/ports/connect
+
+# Connecter à un port spécifique
+curl -X POST http://192.168.1.80:8080/api/ports/connect \
+  -H "Content-Type: application/json" \
+  -d '{"port": "/dev/ttyACM1"}'
+```
+
+### Configuration
+
+```yaml
+# config/default.yaml
+serial:
+  auto_detect: true   # Défaut: true
+  port: /dev/ttyAMA0  # Fallback UART
+  usb_port: /dev/ttyACM0  # Fallback USB
+```
+
+| Option CLI | Effet |
+|------------|-------|
+| (aucune) | Auto-détection activée |
+| `--usb <port>` | Auto-détection désactivée, utilise ce port |
+| `--uart <port>` | Auto-détection désactivée, utilise ce port |
+
+---
+
 ## Magnetometer Calibration (30 Dec 2025)
 
 ```
