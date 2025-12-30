@@ -216,6 +216,33 @@ Telemetry includes `gps_source: "ubx"` or `"msp"` to indicate active source.
 
 - Betaflight must be in **Angle mode** with MSP enabled on a UART
 - Test with `--simulate` flag before hardware testing
+
+### Betaflight CLI Mode - Important
+
+When entering Betaflight CLI mode via serial (`#`), the FC stops responding to MSP binary commands. **Always exit CLI properly** or the port will be stuck in CLI mode until power cycle.
+
+```python
+# ALWAYS use try/finally when accessing CLI
+import serial
+
+ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+try:
+    ser.write(b'#')  # Enter CLI
+    time.sleep(0.3)
+    ser.read(ser.in_waiting)
+
+    # ... CLI commands here ...
+    ser.write(b'get mag_align_yaw\r\n')
+
+finally:
+    ser.write(b'exit\r\n')  # CRITICAL: always exit CLI
+    time.sleep(0.2)
+    ser.close()
+```
+
+If CLI is left open:
+- MSP commands will fail with I/O errors
+- Only fix: disconnect/reconnect USB (power cycle FC)
 - State machine enforces valid transitions only - check `state_machine.py` for allowed transitions
 - All serial communication goes through `serial_manager.py` for proper resource handling
 - Configuration supports environment variable overrides: `PIDRONE_NAVIGATION_POSITION_KP=1.0`
@@ -674,6 +701,14 @@ Password: drone
 ```
 
 SSH: `ssh drone@192.168.1.80`
+
+## Magnetometer Calibration (30 Dec 2025)
+
+```
+mag_align_yaw = -490  (soit -49.0°)
+```
+
+Vérifié: drone pointant nord réel → heading affiché 359° (correct)
 
 ---
 
