@@ -986,3 +986,79 @@ curl http://192.168.1.114:8080/api/status
 | Hover duration | 3s | mission |
 | Touchdown acc threshold | 0.5G | altitude_controller.py |
 | Auto-disarm delay | 2s | config/default.yaml |
+
+---
+
+## Flight Data Logging (31 Dec 2025)
+
+### Overview
+
+Le système enregistre automatiquement toutes les données de vol à 50Hz dans un fichier CSV pour analyse post-vol.
+
+### Fonctionnement
+
+- **ARM** → démarre automatiquement le logging
+- **DISARM** → arrête le logging et ferme le fichier
+- **Fichiers** : `~/.pidrone/logs/flight_YYYYMMDD_HHMMSS_<mission>.csv`
+
+### Données loggées (50Hz)
+
+| Catégorie | Colonnes |
+|-----------|----------|
+| **Time/State** | time_s, loop_idx, flight_state, mission_action |
+| **GPS** | lat, lon, alt_msl, gps_sats, vel_n, vel_e, vel_d, ground_speed |
+| **Attitude** | roll, pitch, yaw |
+| **Altitude** | alt_baro, alt_target, climb_rate, climb_rate_target, height_agl |
+| **Commands** | throttle, roll_cmd, pitch_cmd, yaw_cmd |
+| **Takeoff** | takeoff_state, takeoff_liftoff, takeoff_throttle |
+| **Landing** | landing_phase, landing_descent_rate, touchdown |
+| **Hover** | hover_throttle |
+| **PID Velocity** | pid_vx_p/i/d/out, pid_vy_p/i/d/out, pid_alt_error, pid_alt_integral |
+| **IMU Raw** | acc_x, acc_y, acc_z, gyro_x, gyro_y, gyro_z |
+| **Motors** | motor1, motor2, motor3, motor4 |
+| **RC** | rc_roll, rc_pitch, rc_throttle, rc_yaw, rc_aux1, rc_aux2 |
+| **Battery** | vbat, current_a |
+
+### Récupérer les logs
+
+```bash
+# Depuis le PC
+scp drone@192.168.1.114:~/.pidrone/logs/*.csv .
+
+# Lister les logs sur le Raspberry
+ssh drone@192.168.1.114 "ls -la ~/.pidrone/logs/"
+```
+
+### Analyse Python
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Charger le log
+df = pd.read_csv('flight_20251231_120000_Test_Hover_1m.csv', comment='#')
+
+# Tracer altitude vs temps
+plt.figure(figsize=(12, 6))
+plt.subplot(2, 1, 1)
+plt.plot(df['time_s'], df['alt_baro'], label='Altitude (baro)')
+plt.plot(df['time_s'], df['alt_target'], '--', label='Target')
+plt.legend()
+plt.ylabel('Altitude (m)')
+
+plt.subplot(2, 1, 2)
+plt.plot(df['time_s'], df['throttle'], label='Throttle')
+plt.xlabel('Time (s)')
+plt.ylabel('Throttle')
+plt.legend()
+plt.tight_layout()
+plt.savefig('flight_analysis.png')
+```
+
+### Key Files
+
+| File | Function |
+|------|----------|
+| `src/utils/logger.py` | `FlightDataLogger` class |
+| `src/flight/flight_controller.py:385` | `_log_flight_data()` method |
+| `~/.pidrone/logs/` | Log files directory |
