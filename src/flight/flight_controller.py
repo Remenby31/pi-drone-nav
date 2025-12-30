@@ -13,6 +13,7 @@ from .state_machine import FlightStateMachine, FlightState
 from .preflight_checks import PreflightChecker, PreflightResult
 from ..navigation.takeoff_controller import TakeoffController, TakeoffState
 from .hover_throttle_learner import HoverThrottleLearner
+from ..utils.logger import FlightDataLogger
 from ..drivers.msp import MSPClient, MSPError
 from ..drivers.gps_ubx import GPSDriver, GPSFix
 from ..drivers.serial_manager import SerialManager
@@ -99,6 +100,12 @@ class FlightController:
 
         # Preflight state
         self._preflight_result: Optional[PreflightResult] = None
+
+        # Flight data logger (50Hz CSV logging)
+        self.flight_logger = FlightDataLogger()
+        self._last_imu = None  # For logging IMU data
+        self._last_motors = [1000, 1000, 1000, 1000]  # For logging motor outputs
+        self._last_analog = None  # For logging battery
 
     def initialize(self) -> bool:
         """
@@ -371,6 +378,121 @@ class FlightController:
         if state not in {FlightState.IDLE, FlightState.FAILSAFE, FlightState.ERROR}:
             self._send_rc_commands()
 
+        # Log flight data (50Hz)
+        if self.flight_logger.is_logging:
+            self._log_flight_data()
+
+    def _log_flight_data(self):
+        """Log all flight data for post-flight analysis."""
+        # Get current state
+        state = self.state_machine.state.name if self.state_machine else ""
+
+        # Get mission action
+        mission_action = ""
+        if self.mission_executor and self.mission_executor.current_action:
+            mission_action = self.mission_executor.current_action.get("type", "")
+
+        # GPS data
+        gps = self._last_gps_fix
+        lat = gps.latitude if gps else 0.0
+        lon = gps.longitude if gps else 0.0
+        alt_msl = gps.altitude_msl if gps else 0.0
+        gps_sats = gps.num_satellites if gps else 0
+        vel_n = gps.vel_north if gps else 0.0
+        vel_e = gps.vel_east if gps else 0.0
+        vel_d = gps.vel_down if gps else 0.0
+
+        # Attitude
+        att = self._last_attitude
+        roll = att.roll if att else 0.0
+        pitch = att.pitch if att else 0.0
+        yaw = att.yaw if att else 0.0
+
+        # Altitude controller
+        alt_baro = self.alt_controller.current_altitude if self.alt_controller else 0.0
+        alt_target = self.alt_controller.target_altitude if self.alt_controller else 0.0
+        climb_rate = self.alt_controller.current_climb_rate if self.alt_controller else 0.0
+        height_agl = self.alt_controller.height_agl if self.alt_controller else 0.0
+
+        # Takeoff state
+        takeoff_state = ""
+        takeoff_liftoff = False
+        takeoff_throttle = 0.0
+        if self.takeoff_controller and self.takeoff_controller.is_active:
+            takeoff_state = self.takeoff_controller.state.name
+            takeoff_liftoff = self.takeoff_controller.liftoff_detected
+            status = self.takeoff_controller.get_status()
+            takeoff_throttle = status.get("current_throttle", 0.0)
+
+        # Landing state
+        landing_phase = ""
+        landing_descent_rate = 0.0
+        touchdown = False
+        if self.alt_controller and self.alt_controller.is_landing:
+            landing_phase = self.alt_controller.landing_phase.name if self.alt_controller.landing_phase else ""
+            landing_descent_rate = self.alt_controller.get_landing_descent_rate()
+            touchdown = self.alt_controller.touchdown_confirmed
+
+        # Hover throttle
+        hover_throttle = self.hover_learner.hover_throttle if self.hover_learner else 0.5
+
+        # Throttle from RC channels
+        throttle = (self._rc_channels[2] - 1000) / 1000.0 if len(self._rc_channels) > 2 else 0.0
+
+        # IMU data
+        imu = self._last_imu
+        acc_x = imu.acc_x if imu else 0
+        acc_y = imu.acc_y if imu else 0
+        acc_z = imu.acc_z if imu else 0
+        gyro_x = imu.gyro_x if imu else 0
+        gyro_y = imu.gyro_y if imu else 0
+        gyro_z = imu.gyro_z if imu else 0
+
+        # Motors
+        motors = self._last_motors
+
+        # Battery
+        analog = self._last_analog
+        vbat = analog.vbat if analog else 0.0
+        current_a = analog.amperage if analog else 0.0
+
+        # RC channels
+        rc = self._rc_channels
+
+        # Log everything
+        self.flight_logger.log(
+            flight_state=state,
+            mission_action=mission_action,
+            lat=lat, lon=lon, alt_msl=alt_msl,
+            gps_sats=gps_sats,
+            vel_n=vel_n, vel_e=vel_e, vel_d=vel_d,
+            roll=roll, pitch=pitch, yaw=yaw,
+            alt_baro=alt_baro, alt_target=alt_target,
+            climb_rate=climb_rate, height_agl=height_agl,
+            throttle=throttle,
+            roll_cmd=rc[0] if len(rc) > 0 else 1500,
+            pitch_cmd=rc[1] if len(rc) > 1 else 1500,
+            yaw_cmd=rc[3] if len(rc) > 3 else 1500,
+            takeoff_state=takeoff_state,
+            takeoff_liftoff=takeoff_liftoff,
+            takeoff_throttle=takeoff_throttle,
+            landing_phase=landing_phase,
+            landing_descent_rate=landing_descent_rate,
+            touchdown=touchdown,
+            hover_throttle=hover_throttle,
+            acc_x=acc_x, acc_y=acc_y, acc_z=acc_z,
+            gyro_x=gyro_x, gyro_y=gyro_y, gyro_z=gyro_z,
+            motor1=motors[0], motor2=motors[1],
+            motor3=motors[2], motor4=motors[3],
+            rc_roll=rc[0] if len(rc) > 0 else 1500,
+            rc_pitch=rc[1] if len(rc) > 1 else 1500,
+            rc_throttle=rc[2] if len(rc) > 2 else 1000,
+            rc_yaw=rc[3] if len(rc) > 3 else 1500,
+            rc_aux1=rc[4] if len(rc) > 4 else 1000,
+            rc_aux2=rc[5] if len(rc) > 5 else 1500,
+            vbat=vbat, current_a=current_a,
+        )
+
     def _read_sensors(self):
         """Read sensor data from GPS and MSP"""
         if self.simulation:
@@ -434,12 +556,24 @@ class FlightController:
                     altitude.altitude_cm, altitude.vario_cms
                 )
 
-                # Read IMU for landing touchdown detection
+                # Read IMU (always for logging, also for landing detection)
+                imu = self.msp.get_raw_imu()
+                self._last_imu = imu
                 if self.alt_controller.is_landing:
-                    imu = self.msp.get_raw_imu()
                     self.alt_controller.update_accelerometer(
                         imu.acc_x, imu.acc_y, imu.acc_z
                     )
+
+                # Read motors and battery for logging
+                if self.flight_logger.is_logging:
+                    try:
+                        motors = self.msp.get_motor_values()
+                        if motors and len(motors) >= 4:
+                            self._last_motors = motors[:4]
+                        analog = self.msp.get_analog()
+                        self._last_analog = analog
+                    except MSPError:
+                        pass  # Non-critical for logging
             except MSPError as e:
                 logger.warning(f"MSP read error: {e}")
 
@@ -821,6 +955,12 @@ class FlightController:
         logger.info("Arming...")
         self._armed = True
 
+        # Start flight data logging
+        mission_name = None
+        if self.mission_executor and self.mission_executor.mission:
+            mission_name = self.mission_executor.mission.get("name")
+        self.flight_logger.start(mission_name=mission_name)
+
         # Send arm command via MSP: AUX1 (index 4) = 1800
         # RC format: [Roll, Pitch, Throttle, Yaw, AUX1, AUX2, AUX3, AUX4]
         # Throttle must be ≤1050 to arm (min_check), use 885 (rx_min_usec)
@@ -843,6 +983,9 @@ class FlightController:
         if not self.state_machine.is_flying:
             logger.info("Disarming...")
             self._armed = False
+
+            # Stop flight data logging
+            self.flight_logger.stop()
 
             # Send disarm command via MSP: AUX1 (index 4) = 1000
             self._rc_channels = [1500, 1500, 885, 1500, 1000, 1800, 1500, 1500]

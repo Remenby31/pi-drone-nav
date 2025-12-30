@@ -948,23 +948,27 @@ Voir section "Takeoff System (iNav-style)" ci-dessus pour détails.
 
 ## Commandes Raspberry
 
+Le serveur tourne en **daemon systemd** sur le Raspberry Pi.
+
 ```bash
 # SSH vers Raspberry
 ssh drone@192.168.1.114
 
-# Sur le Raspberry: Démarrer serveur
-cd ~/pi_drone_nav && git pull
-python -m src.server.main --usb /dev/ttyACM0 -v
+# Gestion du daemon
+sudo systemctl status pidrone    # État du serveur
+sudo systemctl restart pidrone   # Redémarrer
+sudo systemctl stop pidrone      # Arrêter
+sudo journalctl -u pidrone -f    # Logs en temps réel
 
 # Depuis PC: Lancer mission
-curl -X POST http://192.168.1.80:8080/api/missions/3f6cebcc-6508-4cd1-9d7d-dc195736f38b/start
+curl -X POST http://192.168.1.114:8080/api/missions/<uuid>/start
 
 # ARRÊT D'URGENCE
-curl -X POST http://192.168.1.80:8080/api/missions/active/stop
+curl -X POST http://192.168.1.114:8080/api/missions/active/stop
 
 # Status
-curl http://192.168.1.80:8080/api/health
-curl http://192.168.1.80:8080/api/missions/active
+curl http://192.168.1.114:8080/api/health
+curl http://192.168.1.114:8080/api/status
 ```
 
 ### Points de contrôle
