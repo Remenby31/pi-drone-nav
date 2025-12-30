@@ -662,3 +662,54 @@ Stationary reading: ~1.00G (2048 raw)
 ```
 
 ACC_SCALE updated in `altitude_controller.py:345`
+
+---
+
+## TODO - Test Glissière (Prochaine étape)
+
+### Objectif
+Test sur glissière verticale: décollage → hover 2m → atterrissage
+
+### Séquence automatique
+```
+1. SPINUP (500ms)     : 0% → 15% throttle
+2. THROTTLE_RAMP      : +30%/sec jusqu'à liftoff (max 70%)
+3. LIFTOFF_DETECT     : altitude > 0.3m ET climb > 0.2m/s
+4. CLIMB              : Monte vers 2m
+5. HOVER (3s)         : Stabilise + hover learning
+6. LAND               : Descente 3 phases (1.5/0.7/0.3 m/s)
+7. TOUCHDOWN          : Détection accéléromètre
+8. DISARM             : Auto après 2s
+```
+
+### Commandes
+```bash
+# Démarrer serveur
+python -m src.server.main --usb /dev/ttyACM0 -v
+
+# Lancer mission
+curl -X POST http://localhost:8080/api/missions/3f6cebcc-6508-4cd1-9d7d-dc195736f38b/start
+
+# ARRÊT D'URGENCE
+curl -X POST http://localhost:8080/api/missions/active/stop
+
+# Status
+curl http://localhost:8080/api/health
+curl http://localhost:8080/api/missions/active
+```
+
+### Points de contrôle
+- [ ] Drone sur glissière, hélices montées
+- [ ] Batterie chargée (>14.8V pour 4S)
+- [ ] GPS fix (>5 sats)
+- [ ] Serveur démarré et connecté
+- [ ] Zone dégagée
+
+### Paramètres clés
+| Paramètre | Valeur | Fichier |
+|-----------|--------|---------|
+| Hover throttle initial | 0.5 | config/hover_throttle.json |
+| Target altitude | 2m | mission |
+| Hover duration | 3s | mission |
+| Touchdown acc threshold | 0.5G | altitude_controller.py |
+| Auto-disarm delay | 2s | config/default.yaml |
