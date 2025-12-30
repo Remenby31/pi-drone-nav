@@ -1,6 +1,49 @@
-# TODO - 31 Dec 2025
+# TODO - Pi Drone Navigation
 
-## Test sans hélices
+---
+
+## Test avec ficelle (31 Dec 2025)
+
+### Changement de méthode
+Utiliser une **ficelle** au lieu d'une glissière :
+- Le drone sera plus libre de ses mouvements
+- Moins de risque de blocage mécanique
+- Permet de tester les corrections d'attitude
+
+### Mission à tester
+`Test Hover 1m`
+1. Takeoff → 1m
+2. Hover 3s
+3. Land
+
+### Checklist avant test
+- [ ] hover_throttle = 0.5 (vérifier `~/.pidrone/hover_throttle.json`)
+- [ ] Flight logging actif (automatique au ARM)
+- [ ] Ficelle assez longue (~2m)
+- [ ] Point d'attache solide au-dessus du drone
+- [ ] Hélices montées
+- [ ] Batterie chargée (>14.8V pour 4S)
+- [ ] GPS fix (>5 sats)
+- [ ] Zone dégagée
+
+### Commandes
+```bash
+# Vérifier hover_throttle
+ssh drone@192.168.1.114 "cat ~/.pidrone/hover_throttle.json"
+
+# Lancer la mission
+curl -X POST http://192.168.1.114:8080/api/missions/50d4ebda-b217-47a5-9d30-a077c848bb93/start
+
+# ARRÊT D'URGENCE
+curl -X POST http://192.168.1.114:8080/api/missions/active/stop
+
+# Récupérer les logs après le test
+scp drone@192.168.1.114:~/.pidrone/logs/*.csv .
+```
+
+---
+
+## Test sans hélices (30 Dec 2025) - DONE
 
 ### Pré-requis
 - [ ] Hélices retirées
