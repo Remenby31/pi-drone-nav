@@ -87,16 +87,17 @@ class AltitudeController:
         nav = config.navigation
         alt_config = config.altitude
 
-        # Altitude to climb rate (P control)
+        # Altitude to climb rate (P control) - iNav: nav_mc_pos_z_p = 50/100 = 0.5
         self.alt_p_gain = nav.alt_p_gain
 
-        # Climb rate to throttle (PID)
-        # Gains harmonized with takeoff controller for 50Hz MSP
+        # Climb rate to throttle (PID) - iNav nav_mc_vel_z_*
+        # P = 100/66.7 = 1.5, I = 50/20 = 2.5, D = 10/100 = 0.1
         climb_gains = PIDGains(
-            kp=0.15,   # Same as takeoff
-            ki=0.05,   # Same as takeoff
-            kd=0.02,   # Same as takeoff
-            i_max=0.2  # Anti-windup limit
+            kp=nav.alt_vel_p_gain,    # iNav: 1.5
+            ki=nav.alt_vel_i_gain,    # iNav: 2.5
+            kd=nav.alt_vel_d_gain,    # iNav: 0.1
+            i_max=0.3,                # Anti-windup limit
+            d_filter_hz=5.0           # iNav: NAV_VEL_Z_DERIVATIVE_CUT_HZ
         )
         self.climb_pid = PIDController(climb_gains)
         self.climb_pid.set_output_limits(-nav.throttle_margin, nav.throttle_margin)

@@ -47,24 +47,27 @@ class VelocityController:
         nav = config.navigation
 
         # PID controllers for X (North) and Y (East)
+        # iNav nav_mc_vel_xy_*: P=40/20=2.0, I=15/100=0.15, D=100/100=1.0
+        # D-term filter: nav_mc_vel_xy_dterm_lpf_hz default = 2 Hz
         gains_xy = PIDGains(
-            kp=nav.vel_p_gain,
-            ki=nav.vel_i_gain,
-            kd=nav.vel_d_gain,
+            kp=nav.vel_p_gain,      # iNav: 2.0
+            ki=nav.vel_i_gain,      # iNav: 0.15
+            kd=nav.vel_d_gain,      # iNav: 1.0
             i_max=nav.vel_i_max,
-            d_filter_hz=10.0
+            d_filter_hz=2.0         # iNav: nav_mc_vel_xy_dterm_lpf_hz = 2 Hz
         )
 
         self.pid_x = PIDController(gains_xy)
         self.pid_y = PIDController(gains_xy)
 
-        # Acceleration limits
+        # Acceleration limits - iNav: NAV_ACCELERATION_XY_MAX = 980 cm/s² ≈ 9.8 m/s²
         self.max_accel = nav.max_horizontal_accel_mss
 
         self.pid_x.set_output_limits(-self.max_accel, self.max_accel)
         self.pid_y.set_output_limits(-self.max_accel, self.max_accel)
 
         # Jerk limiting (rate of acceleration change)
+        # iNav: MC_POS_CONTROL_JERK_LIMIT_CMSSS = 1700 cm/s³ = 17 m/s³
         self.jerk_limit = nav.jerk_limit_msss
         self.last_accel_x = 0.0
         self.last_accel_y = 0.0

@@ -50,30 +50,38 @@ class GPSConfig:
 
 @dataclass
 class NavigationConfig:
-    """Navigation controller parameters"""
+    """
+    Navigation controller parameters
+
+    Gains aligned with iNav defaults (navigation.c:4898-4945):
+    - Position XY: nav_mc_pos_xy_p = 65/100 = 0.65
+    - Velocity XY: P=40/20=2.0, I=15/100=0.15, D=100/100=1.0
+    """
 
     # Control loop
     update_rate_hz: float = 50.0        # Main control loop frequency
 
-    # Position controller (P)
-    pos_p_gain: float = 1.0             # Position to velocity gain
+    # Position controller (P) - iNav: 65/100 = 0.65
+    pos_p_gain: float = 0.65            # Position to velocity gain
     max_horizontal_speed_ms: float = 15.0  # m/s (configurable 10-15)
     max_vertical_speed_ms: float = 3.0     # m/s
 
-    # Velocity controller (PID)
+    # Velocity controller (PID) - iNav: P=40/20, I=15/100, D=100/100
     vel_p_gain: float = 2.0
-    vel_i_gain: float = 0.5
-    vel_d_gain: float = 0.1
+    vel_i_gain: float = 0.15
+    vel_d_gain: float = 1.0
     vel_i_max: float = 5.0              # Anti-windup limit
 
     # Acceleration limits
-    max_horizontal_accel_mss: float = 5.0   # m/s^2 (~30 deg lean)
+    max_horizontal_accel_mss: float = 9.8   # m/s^2 (iNav: 980 cm/s² ≈ 1G, ~45 deg lean)
     max_vertical_accel_mss: float = 3.0     # m/s^2
-    jerk_limit_msss: float = 1.7            # m/s^3 (from iNav)
+    jerk_limit_msss: float = 17.0           # m/s^3 (iNav: 1700 cm/s³)
 
-    # Altitude controller
-    alt_p_gain: float = 0.5
-    climb_rate_p_gain: float = 5.0
+    # Altitude controller - iNav: pos_z P=50/100, vel_z P=100/66.7, I=50/20, D=10/100
+    alt_p_gain: float = 0.5             # Position Z P-gain (iNav: 50/100)
+    alt_vel_p_gain: float = 1.5         # Velocity Z P-gain (iNav: 100/66.7)
+    alt_vel_i_gain: float = 2.5         # Velocity Z I-gain (iNav: 50/20)
+    alt_vel_d_gain: float = 0.1         # Velocity Z D-gain (iNav: 10/100)
     hover_throttle: float = 0.5         # To be calibrated
     throttle_margin: float = 0.3        # +/- from hover
 
@@ -188,25 +196,28 @@ class TakeoffConfig:
     """
     Takeoff configuration - iNav-style velocity PID
 
-    Adapted for MSP control frequency (25-50Hz vs iNav's 100-500Hz):
-    - PID gains halved from iNav defaults
-    - Filter cutoff reduced to 2Hz (iNav uses 4Hz)
+    Uses same velocity Z gains as iNav (navigation.c:4939-4944):
+    - P = 100/66.7 = 1.5
+    - I = 50/20 = 2.5
+    - D = 10/100 = 0.1
+
+    dt is used correctly in PID calculations, so no frequency adjustment needed.
     """
 
     # Target
     default_altitude_m: float = 3.0
-    target_climb_rate_ms: float = 0.2  # m/s target climb rate during takeoff (20cm/s for testing)
+    target_climb_rate_ms: float = 1.0   # m/s target climb rate during takeoff
 
     # Spinup phase
     spinup_time_ms: int = 500           # Motor spinup duration
     spinup_throttle: float = 0.15       # Throttle at end of spinup
 
-    # Velocity PID (adapted for 50Hz MSP)
-    vel_kp: float = 0.15                # Half of iNav's 0.30
-    vel_ki: float = 0.05                # Half of iNav's 0.10
-    vel_kd: float = 0.02                # Half of iNav's 0.05
-    vel_i_max: float = 0.2              # Anti-windup limit
-    velocity_filter_hz: float = 2.0     # Low-pass filter (iNav uses 4Hz)
+    # Velocity PID - iNav nav_mc_vel_z_*: P=100/66.7, I=50/20, D=10/100
+    vel_kp: float = 1.5                 # iNav: 100/66.7
+    vel_ki: float = 2.5                 # iNav: 50/20
+    vel_kd: float = 0.1                 # iNav: 10/100
+    vel_i_max: float = 0.3              # Anti-windup limit
+    velocity_filter_hz: float = 5.0     # iNav: NAV_VEL_Z_DERIVATIVE_CUT_HZ
 
     # Liftoff detection (iNav-style: throttle + gyro)
     liftoff_gyro_threshold_dps: float = 7.0   # Gyro magnitude threshold (deg/s)

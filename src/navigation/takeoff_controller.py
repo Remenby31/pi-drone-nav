@@ -6,10 +6,12 @@ Implements iNav's takeoff method:
 - Liftoff detection: throttle > hover AND gyro > 7°/s
 - Simple 3-state machine: SPINUP -> CLIMBING -> COMPLETE
 
-Adapted for MSP control frequency (25-50Hz vs iNav's 100-500Hz):
-- Reduced PID gains (halved)
-- Lower filter cutoff (2Hz vs 4Hz)
-- Longer confirmation times
+Uses same velocity Z PID gains as iNav (navigation.c:4939-4944):
+- P = 100/66.7 = 1.5
+- I = 50/20 = 2.5
+- D = 10/100 = 0.1
+
+No frequency adaptation needed because PID uses dt correctly.
 """
 
 from enum import Enum, auto

@@ -87,8 +87,18 @@ MSP_SET_RAW_RC → Betaflight (Angle Mode) → Motors
 
 ### Key Configuration
 
-All parameters are in `config/default.yaml`. Key values:
-- Position Kp: 0.8, Velocity PID: 0.5/0.1/0.05
+All parameters are in `config/default.yaml`. Values aligned with iNav defaults (navigation.c:4898-4945):
+
+**Position/Velocity XY:**
+- Position Kp: 0.65 (iNav: 65/100)
+- Velocity PID: Kp=2.0, Ki=0.15, Kd=1.0 (iNav: 40/20, 15/100, 100/100)
+- Jerk limit: 17 m/s³ (iNav: 1700 cm/s³)
+
+**Altitude (Velocity Z):**
+- Position Z Kp: 0.5 (iNav: 50/100)
+- Velocity Z PID: Kp=1.5, Ki=2.5, Kd=0.1 (iNav: 100/66.7, 50/20, 10/100)
+
+**Other:**
 - Max tilt: 30°, Max horizontal speed: 10 m/s
 - Control loop: 50Hz, GPS: 10Hz
 - Failsafe: GPS loss → hold, low battery → RTH
@@ -234,16 +244,17 @@ gyro_magnitude > 7.0 deg/s        # Drone actually moving
 
 This is more reliable than altitude-only detection because it confirms the drone is actually leaving the ground.
 
-### MSP Frequency Adaptation
+### PID Gains (aligned with iNav)
 
-PID gains reduced for 50Hz MSP control (vs iNav's 100-500Hz):
+Uses same velocity Z gains as iNav altitude controller (navigation.c:4939-4944).
+No frequency adaptation needed because PID uses `dt` correctly.
 
-| Parameter | iNav (100Hz) | pi_drone_nav (50Hz) |
-|-----------|-------------|---------------------|
-| Kp | 0.30 | 0.15 |
-| Ki | 0.10 | 0.05 |
-| Kd | 0.05 | 0.02 |
-| Filter cutoff | 4 Hz | 2 Hz |
+| Parameter | iNav | pi_drone_nav |
+|-----------|------|--------------|
+| Kp | 100/66.7 = 1.5 | 1.5 |
+| Ki | 50/20 = 2.5 | 2.5 |
+| Kd | 10/100 = 0.1 | 0.1 |
+| Filter cutoff | 5 Hz | 5 Hz |
 
 ### Key Files
 
@@ -263,11 +274,11 @@ takeoff:
   default_altitude_m: 3.0
   target_climb_rate_ms: 1.0     # m/s
 
-  # Velocity PID (adapted for 50Hz)
-  vel_kp: 0.15
-  vel_ki: 0.05
-  vel_kd: 0.02
-  velocity_filter_hz: 2.0
+  # Velocity PID (iNav nav_mc_vel_z_*)
+  vel_kp: 1.5                   # iNav: 100/66.7
+  vel_ki: 2.5                   # iNav: 50/20
+  vel_kd: 0.1                   # iNav: 10/100
+  velocity_filter_hz: 5.0       # iNav: NAV_VEL_Z_DERIVATIVE_CUT_HZ
 
   # Liftoff detection (iNav-style)
   liftoff_gyro_threshold_dps: 7.0
