@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Betaflight Source Reference
+
+When unsure about Betaflight CLI commands or settings, check the source code at `../betaflight/`. Key files:
+- `src/main/cli/cli.c` - CLI commands (e.g., `map` not `rcmap`)
+- `src/main/pg/` - Parameter groups and settings
+- `src/main/msp/msp.c` - MSP protocol implementation
+
 ## Project Overview
 
 Pi Drone Navigation is an autonomous drone navigation system for Raspberry Pi with Betaflight flight controller. It provides GPS-based waypoint navigation by sending MSP commands to Betaflight running in Angle mode.
@@ -63,7 +70,7 @@ MSP_SET_RAW_RC → Betaflight (Angle Mode) → Motors
   - `pid.py` - PID with anti-windup, D-term filtering, feed-forward
   - `position_controller.py` - GPS position → velocity setpoint
   - `velocity_controller.py` - Velocity → acceleration → pitch/roll angles
-  - `altitude_controller.py` - Altitude hold and throttle control
+  - `altitude_controller.py` - Altitude hold, throttle control, **iNav-style landing**
   - `waypoint_navigator.py` - Mission execution with fly-through/hover modes
 
 - **`src/flight/`** - Flight orchestration
@@ -84,6 +91,110 @@ All parameters are in `config/default.yaml`. Key values:
 - Max tilt: 30°, Max horizontal speed: 10 m/s
 - Control loop: 50Hz, GPS: 10Hz
 - Failsafe: GPS loss → hold, low battery → RTH
+
+## Landing System (iNav-style)
+
+Implementation date: 30 Dec 2025
+
+### Overview
+
+The landing system uses a 3-phase approach inspired by iNav, with accelerometer-based touchdown detection and position hold during descent.
+
+### Landing Phases
+
+```
+PHASE_HIGH (>5m AGL)   →  descent 1.5 m/s  (fast)
+        ↓
+PHASE_MID (1-5m AGL)   →  descent 0.7 m/s  (medium)
+        ↓
+PHASE_FINAL (<1m AGL)  →  descent 0.3 m/s  (slow) + touchdown detection
+        ↓
+TOUCHDOWN              →  motors idle, wait 2s
+        ↓
+AUTO-DISARM            →  transition to IDLE
+```
+
+### Touchdown Detection
+
+**Primary method: Accelerometer spike**
+- Reads IMU via `MSP_RAW_IMU` during landing
+- Detects acceleration spike > 1.5G (above baseline)
+- Must persist for 0.5s at altitude < 0.5m AGL
+- Inspired by iNav's `navigationDetectLandingEvent()`
+
+**Fallback method: Altitude + Vario**
+- If accelerometer doesn't trigger
+- Altitude < 0.3m AND climb rate < 0.2 m/s
+- Must persist for 2.0s
+
+### Key Files
+
+| File | Function |
+|------|----------|
+| `src/navigation/altitude_controller.py` | `LandingPhase` enum, `LandingConfig`, touchdown detection |
+| `src/flight/flight_controller.py:675` | `_update_landing()` - main landing loop |
+| `config/default.yaml` | `landing:` section with all parameters |
+
+### API
+
+```python
+# In AltitudeController
+alt_controller.start_landing()           # Initialize landing sequence
+alt_controller.get_landing_descent_rate() # Get current phase descent rate
+alt_controller.check_touchdown()          # Check for ground contact
+alt_controller.should_disarm()            # Check if auto-disarm ready
+alt_controller.landing_phase              # Current LandingPhase enum
+alt_controller.touchdown_confirmed        # Bool: touchdown detected
+```
+
+### Configuration
+
+```yaml
+# config/default.yaml
+landing:
+  # Descent speeds (m/s)
+  speed_high: 1.5
+  speed_mid: 0.7
+  speed_final: 0.3
+
+  # Altitude thresholds (m AGL)
+  threshold_high: 5.0
+  threshold_mid: 1.0
+
+  # Accelerometer detection
+  acc_threshold_g: 1.5
+  touchdown_alt_max: 0.5
+  touchdown_confirm_time: 0.5
+
+  # Auto-disarm
+  auto_disarm: true
+  disarm_delay: 2.0
+```
+
+### Telemetry
+
+When landing is active, telemetry includes:
+```json
+{
+  "landing": {
+    "phase": "PHASE_MID",
+    "height_agl": 2.3,
+    "descent_rate": -0.7,
+    "touchdown": false
+  }
+}
+```
+
+### Comparison with iNav/ArduPilot
+
+| Feature | pi_drone_nav | iNav | ArduPilot |
+|---------|-------------|------|-----------|
+| 3-phase descent | ✓ | ✓ | ✓ |
+| Position hold | ✓ | ✓ | ✓ |
+| Accelerometer detection | ✓ | ✓ | ✓ |
+| Rangefinder support | ✗ | ✓ | ✓ |
+| Terrain following | ✗ | ✓ | ✓ |
+| Precision landing | ✗ | ✗ | ✓ |
 
 ## GPS Sources
 
@@ -170,10 +281,10 @@ Comprehensive testing with RX_MSP enabled confirmed:
 
 1. **Individual Channel Control**: Each of 8 RC channels can be set independently
    - Channels 0, 1, 4-7: Correct 1:1 mapping (send index N → receive index N)
-   - **⚠️ CRITICAL: Channels 2 & 3 are SWAPPED** in Betaflight rcmap
-     - Send ch2 → Received at index 3
-     - Send ch3 → Received at index 2
-     - This is a Betaflight `rcmap` configuration (receiver input remapping)
+   - **✓ FIXED: Channels 2 & 3 swap compensated in `msp.py:set_raw_rc()`**
+     - Betaflight internal order is AERT, but `map AETR1234` causes swap
+     - `set_raw_rc()` swaps ch2/ch3 before sending to compensate
+     - Caller uses standard AETR order: [Roll, Pitch, Throttle, Yaw, AUX...]
 
 2. **Timing Characteristics**:
    - **Fast response**: Updates appear immediately (~10ms)
@@ -185,29 +296,24 @@ Comprehensive testing with RX_MSP enabled confirmed:
    - Full end-to-end verified: Pi → MSP_SET_RAW_RC → Betaflight → Motor outputs
    - Motors respond to throttle changes when armed
 
-4. **CRITICAL: Channel 2/3 Swap Impact**:
-   - **This MUST be fixed before flight testing** - affects control accuracy
-   - If flight_controller sets ch2 for pitch, it will control ch3 (yaw) instead
-   - Results in inverted/incorrect axis control
-   - Fix options:
-     a) **Recommended: Fix in Betaflight configurator** (change rcmap setting)
-     b) Compensate in Python (pre-swap before sending)
+4. **Channel 2/3 Swap - RESOLVED (30 Dec 2025)**:
+   - Root cause: Betaflight internal order is AERT, `map AETR1234` swaps ch2/ch3
+   - Fix: `msp.py:set_raw_rc()` swaps ch2/ch3 before sending
+   - Verified working: send Thr=1200 on ch2 → received correctly on ch2
 
 ### Implementation Notes
 
 - ✓ RC control via MSP_SET_RAW_RC is fully functional
 - ✓ All 8 channels can be controlled independently
-- **⚠️ BLOCKING ISSUE: Channel 2/3 swap must be resolved**
-- Recommend fixing in Betaflight rather than adding compensation code
-- This is a receiver/hardware configuration issue, not a software bug
+- ✓ Channel 2/3 swap compensated in `msp.py:set_raw_rc()`
+- Caller uses standard order: [Roll, Pitch, Throttle, Yaw, AUX1, AUX2, AUX3, AUX4]
 
 ### Next Steps for Flight Testing
 
-1. **CRITICAL: Resolve ch2/ch3 swap** in Betaflight configurator or CLI
-2. Verify RC control: increase ch0 (throttle) → all motors increase proportionally
-3. Verify pitch/roll/yaw channels control correct axes
-4. Test with motors spinning in safe conditions (guards/no props)
-5. Once verified, proceed with actual flight testing
+1. Verify RC control: increase ch2 (throttle) → all motors increase proportionally
+2. Verify pitch/roll/yaw channels control correct axes
+3. Test with motors spinning in safe conditions (guards/no props)
+4. Once verified, proceed with actual flight testing
 
 ---
 
@@ -387,24 +493,172 @@ Complete test of all MSP functions in `src/drivers/msp.py`:
 4. **Throttle Control**: Throttle ramp (1000 → 1100 → 1000) works while armed
 5. **Disarming**: Setting AUX1 back to 1000 disarms
 
-**Channel Mapping (with ch2/ch3 swap):**
+**Channel Mapping:**
 ```python
 # RC array indices for MSP_SET_RAW_RC:
 # [Roll, Pitch, Throttle, Yaw, AUX1, AUX2, AUX3, AUX4]
 #   0     1       2        3     4     5     6     7
-# Note: Throttle at index 2 goes to ch3, Yaw at index 3 goes to ch2 (Betaflight rcmap)
-RC_DISARMED = [1500, 1500, 1000, 1500, 1000, 1800, 1500, 1500]
-RC_ARMED    = [1500, 1500, 1000, 1500, 1800, 1800, 1500, 1500]
+# With "map AETR1234": ch2→THROTTLE, ch3→YAW (no swap needed)
+# Throttle must be ≤1050 (min_check) to arm, use 885 (rx_min_usec)
+RC_DISARMED = [1500, 1500, 885, 1500, 1000, 1800, 1500, 1500]
+RC_ARMED    = [1500, 1500, 885, 1500, 1800, 1800, 1500, 1500]
 ```
 
-### Remaining Issue
+### ✅ Channel Mapping - CORRECTED (30 Dec 2025)
 
-**Channel 2/3 swap** still present in RC readings - needs to be fixed in Betaflight CLI:
-```bash
-# Check current rcmap
-get rcmap
+With `map AETR1234` in Betaflight, the rcmap does:
+- ch2 → THROTTLE (internal index 3)
+- ch3 → YAW (internal index 2)
 
-# Fix if needed (default AETR1234)
-set rcmap = AETR1234
-save
+**No swap needed in msp.py!** We send `[Roll, Pitch, Throttle, Yaw, AUX...]` directly.
+
+The earlier swap was incorrect and caused throttle to go to the wrong channel.
+
+---
+
+## ARM/DISARM Implementation (30 Dec 2025)
+
+### How ARM Works
+
+The `FlightController.arm()` method now sends actual MSP commands:
+
+```python
+# flight_controller.py:783-800
+def arm(self) -> bool:
+    self._armed = True
+    # AUX1 (index 4) = 1800 to arm
+    self._rc_channels = [1500, 1500, 1000, 1500, 1800, 1800, 1500, 1500]
+    self.msp.set_raw_rc(self._rc_channels)
+    return self.state_machine.transition_to(FlightState.ARMED)
 ```
+
+### How DISARM Works
+
+```python
+# AUX1 (index 4) = 1000 to disarm
+self._rc_channels = [1500, 1500, 1000, 1500, 1000, 1800, 1500, 1500]
+self.msp.set_raw_rc(self._rc_channels)
+```
+
+### State Timeouts
+
+Reduced for faster failure detection:
+
+| State | Timeout | Action on timeout |
+|-------|---------|-------------------|
+| TAKEOFF | 10s | → LANDING |
+| LANDING | 20s | → FAILSAFE |
+
+---
+
+## Betaflight RX_MSP Bugs (30 Dec 2025)
+
+### Bug 1: RX_MSP missing from CLI featureNames
+
+**Symptôme**: `feature RX_MSP` retourne `INVALID NAME`
+
+**Cause**: Le nom "RX_MSP" était absent du tableau `featureNames[]` dans `cli/cli.c`, même si `FEATURE_RX_MSP` (bit 14) existe dans `feature.h`.
+
+**Fix appliqué**: Ajouté `_R(FEATURE_RX_MSP, "RX_MSP"),` dans `cli/cli.c:247`
+
+**Issue GitHub**: `docs/betaflight_rx_msp_cli_bug.md`
+
+### Bug 2: RX rate = 0 avec RX_MSP - CORRIGÉ (30 Dec 2025)
+
+**Symptôme**: `status` montre `RX rate: 0` et les flags `RXLOSS MSP` bloquent l'armement.
+
+**Cause racine**: `rxMspFrameStatus()` dans `rx/msp.c` ne mettait pas à jour `lastRcFrameTimeUs`.
+
+**Fix appliqué** dans `rx/msp.c`:
+```c
+static uint8_t rxMspFrameStatus(rxRuntimeState_t *rxRuntimeState)
+{
+    if (!rxMspFrameDone) {
+        return RX_FRAME_PENDING;
+    }
+    rxMspFrameDone = false;
+    rxRuntimeState->lastRcFrameTimeUs = micros();  // FIX
+    return RX_FRAME_COMPLETE;
+}
+```
+
+**Fork Betaflight**: https://github.com/Remenby31/betaflight (branche `fix/rx-msp-cli-support`)
+
+---
+
+## Mission Format v1.0 (30 Dec 2025)
+
+### Action Types
+
+| Type | Parameters | Description |
+|------|------------|-------------|
+| `takeoff` | `alt` | Takeoff to altitude (m) |
+| `goto` | `lat`, `lon`, `alt`, `speed` | Fly to GPS position |
+| `hover` | `duration` | Hold position for N seconds |
+| `delay` | `duration` | Wait (no position control) |
+| `orient` | `heading` | Turn to heading (degrees) |
+| `land` | - | Land and disarm |
+| `rth` | - | Return to home then land |
+
+### Example Mission
+
+```json
+{
+  "version": "1.0",
+  "name": "Test Hover 2m",
+  "actions": [
+    {"type": "takeoff", "alt": 2.0},
+    {"type": "hover", "duration": 3.0},
+    {"type": "land"}
+  ]
+}
+```
+
+### Available Test Missions
+
+| File | Description |
+|------|-------------|
+| `config/missions/test_hover_2m.json` | Simple 2m hover test |
+| `config/missions/sample_mission.json` | Square pattern demo |
+
+---
+
+## Propless Tests (30 Dec 2025)
+
+### Hover Mission Simulation ✓
+
+Test sans hélices validant la chaîne de contrôle complète:
+
+```
+1. Connexion OK
+2. ARM OK - Motors: [1067, 1063, 1056, 1056]
+3. Throttle ramp: 950 → 1000 → 1100 → 1200
+   - @1200: Motors [1327, 1083, 1323, 1084]
+4. Hover 3s OK
+5. Landing sim: 1200 → 1100 → 1000 → 885
+6. DISARM OK - Motors: [1000, 1000, 1000, 1000]
+```
+
+### Landing Sequence ✓
+
+iNav-style 3-phase landing vérifié:
+
+| Phase | Altitude | Descent Rate |
+|-------|----------|--------------|
+| PHASE_HIGH | >5m | 1.5 m/s |
+| PHASE_MID | 1-5m | 0.7 m/s |
+| PHASE_FINAL | <1m | 0.3 m/s |
+
+Touchdown detection:
+- **Accelerometer**: Spike >0.5G above baseline for 0.5s
+- **Fallback**: Altitude <0.3m + vario <0.2m/s for 2.0s
+- **Auto-disarm**: 2.0s after touchdown
+
+### IMU Configuration
+
+```
+Accelerometer scale: 2048 LSB/G (±16G range)
+Stationary reading: ~1.00G (2048 raw)
+```
+
+ACC_SCALE updated in `altitude_controller.py:345`

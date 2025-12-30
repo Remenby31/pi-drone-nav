@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "name": "Test Hover 2m",
+  "description": "Simple takeoff to 2m, hover 3s, land - for initial testing",
+  "defaults": {
+    "speed": 2.0,
+    "alt": 2.0
+  },
+  "actions": [
+    {
+      "type": "takeoff",
+      "alt": 2.0
+    },
+    {
+      "type": "hover",
+      "duration": 3.0
+    },
+    {
+      "type": "land"
+    }
+  ]
+}

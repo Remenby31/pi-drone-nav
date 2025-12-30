@@ -233,8 +233,10 @@ class FlightController:
 
         @self.state_machine.on_enter(FlightState.LANDING)
         def on_landing_enter():
-            logger.info("Starting landing sequence")
+            logger.info("Starting iNav-style landing sequence")
             self._target_altitude = 0.0
+            # Initialize iNav-style landing
+            self.alt_controller.start_landing()
 
         @self.state_machine.on_enter(FlightState.POSITION_HOLD)
         def on_position_hold():
@@ -409,6 +411,13 @@ class FlightController:
                 self.alt_controller.update_altitude_from_fc(
                     altitude.altitude_cm, altitude.vario_cms
                 )
+
+                # Read IMU for landing touchdown detection
+                if self.alt_controller.is_landing:
+                    imu = self.msp.get_raw_imu()
+                    self.alt_controller.update_accelerometer(
+                        imu.acc_x, imu.acc_y, imu.acc_z
+                    )
             except MSPError as e:
                 logger.warning(f"MSP read error: {e}")
 
@@ -664,19 +673,61 @@ class FlightController:
             self.state_machine.transition_to(FlightState.POSITION_HOLD)
 
     def _update_landing(self, dt: float):
-        """Update landing sequence"""
-        # Descend slowly
-        self.alt_controller.set_target_climb_rate(-0.5)  # 0.5 m/s descent
+        """
+        Update landing sequence (iNav-style 3-phase landing)
 
+        Phases:
+        - PHASE_HIGH (>5m): Fast descent at 1.5 m/s
+        - PHASE_MID (1-5m): Medium descent at 0.7 m/s
+        - PHASE_FINAL (<1m): Slow descent at 0.3 m/s + touchdown detection
+        """
+        from ..navigation.altitude_controller import LandingPhase
+
+        # Get variable descent rate based on altitude phase
+        descent_rate = self.alt_controller.get_landing_descent_rate()
+        self.alt_controller.set_target_climb_rate(descent_rate)
+
+        # Position hold during landing (maintain horizontal position)
+        vel_n, vel_e, vel_d = self.pos_controller.update()
+        self.vel_controller.set_target_velocity(vel_n, vel_e, 0.0)  # No vertical velocity from pos ctrl
+
+        # Velocity → Attitude (for position hold)
+        attitude_cmd = self.vel_controller.update(dt)
+
+        # Altitude → Throttle
         throttle = self.alt_controller.update(dt)
 
-        # Keep level
-        self._rc_channels = [1500, 1500, int(throttle * 1000 + 1000), 1500, 1500, 1500, 1500, 1500]
+        # Convert to RC with position hold corrections
+        self._rc_channels = list(angles_to_rc(
+            attitude_cmd.roll_deg,
+            attitude_cmd.pitch_deg,
+            throttle,
+            0.0,  # No yaw rate
+            self.config.navigation.max_bank_angle_deg
+        )) + [1800, 1800, 1500, 1500]  # Keep armed
 
-        # Check if landed
+        # Log phase transitions
+        phase = self.alt_controller.landing_phase
+        height_agl = self.alt_controller.get_height_agl()
+        if phase != getattr(self, '_last_landing_phase', None):
+            logger.info(f"Landing phase: {phase.name} at {height_agl:.1f}m AGL, descent: {-descent_rate:.2f} m/s")
+            self._last_landing_phase = phase
+
+        # Check for touchdown (accelerometer + altitude)
+        if self.alt_controller.check_touchdown():
+            logger.info("Touchdown detected!")
+
+        # Check if landed and ready to disarm
         if self.alt_controller.is_landed:
-            logger.info("Landing complete")
+            logger.info("Landing confirmed")
             self.state_machine.transition_to(FlightState.LANDED)
+
+            # Auto-disarm after delay
+            if self.alt_controller.should_disarm():
+                logger.info("Auto-disarm triggered")
+                self._armed = False
+                self.alt_controller.abort_landing()
+                self.state_machine.transition_to(FlightState.IDLE)
 
     def _update_rth(self, dt: float):
         """Update return to home"""
@@ -730,8 +781,23 @@ class FlightController:
                 logger.warning(f"Pre-flight warning: {warning}")
 
         logger.info("Arming...")
-        # TODO: Send arm command to Betaflight
         self._armed = True
+
+        # Send arm command via MSP: AUX1 (index 4) = 1800
+        # RC format: [Roll, Pitch, Throttle, Yaw, AUX1, AUX2, AUX3, AUX4]
+        # Throttle must be ≤1050 to arm (min_check), use 885 (rx_min_usec)
+        self._rc_channels = [1500, 1500, 885, 1500, 1800, 1800, 1500, 1500]
+
+        if self.msp:
+            try:
+                # Send arm command immediately
+                self.msp.set_raw_rc(self._rc_channels)
+                logger.info("ARM command sent: AUX1=1800")
+            except MSPError as e:
+                logger.error(f"Failed to send arm command: {e}")
+                self._armed = False
+                return False
+
         return self.state_machine.transition_to(FlightState.ARMED)
 
     def disarm(self) -> bool:
@@ -739,6 +805,17 @@ class FlightController:
         if not self.state_machine.is_flying:
             logger.info("Disarming...")
             self._armed = False
+
+            # Send disarm command via MSP: AUX1 (index 4) = 1000
+            self._rc_channels = [1500, 1500, 885, 1500, 1000, 1800, 1500, 1500]
+
+            if self.msp:
+                try:
+                    self.msp.set_raw_rc(self._rc_channels)
+                    logger.info("DISARM command sent: AUX1=1000")
+                except MSPError as e:
+                    logger.error(f"Failed to send disarm command: {e}")
+
             return self.state_machine.transition_to(FlightState.IDLE)
         else:
             logger.warning("Cannot disarm while flying")
@@ -936,6 +1013,15 @@ class FlightController:
                 'checks': [c.name for c in self._preflight_result.checks],
                 'failures': self._preflight_result.blocking_failures,
                 'warnings': self._preflight_result.warnings
+            }
+
+        # Add landing status if active
+        if self.alt_controller.is_landing:
+            telemetry['landing'] = {
+                'phase': self.alt_controller.landing_phase.name,
+                'height_agl': self.alt_controller.get_height_agl(),
+                'descent_rate': self.alt_controller.get_landing_descent_rate(),
+                'touchdown': self.alt_controller.touchdown_confirmed,
             }
 
         return telemetry

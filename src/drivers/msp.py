@@ -567,16 +567,24 @@ class MSPClient:
 
         Args:
             channels: List of 8-18 channel values (1000-2000)
+                      Order: [Roll, Pitch, Throttle, Yaw, AUX1, AUX2, ...]
 
         Note:
-            Betaflight must have serialrx_provider = MSP configured
+            Betaflight must have serialrx_provider = MSP configured.
+            Channels 2/3 are swapped internally to compensate for Betaflight's
+            AERT internal order vs AETR map configuration.
         """
         if len(channels) < 8:
             # Pad to 8 channels minimum
             channels = channels + [1500] * (8 - len(channels))
 
-        # Clamp values
-        channels = [max(1000, min(2000, c)) for c in channels]
+        # Clamp values (allow down to 850 for low throttle arming)
+        channels = [max(850, min(2000, c)) for c in channels]
+
+        # With "map AETR1234" in Betaflight:
+        # - ch2 maps to THROTTLE (internal index 3)
+        # - ch3 maps to YAW (internal index 2)
+        # So we send: [Roll, Pitch, Throttle, Yaw, AUX...] - no swap needed
 
         data = struct.pack('<' + 'H' * len(channels), *channels)
         self.send_command(MSPCommand.MSP_SET_RAW_RC, data)

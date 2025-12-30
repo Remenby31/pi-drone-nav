@@ -184,8 +184,9 @@ class APIServer:
                 return jsonify({'error': 'Failed to arm'}), 400
 
             if self.mission_executor.start():
-                from ..flight.state_machine import FlightState
-                self.fc.state_machine.transition_to(FlightState.MISSION)
+                # Note: State transitions are handled by flight controller
+                # based on mission actions (takeoff -> flying -> etc)
+                # Don't force MISSION state here - let the control loop handle it
                 return jsonify({
                     'success': True,
                     'message': f"Mission '{mission.name}' started"
@@ -251,10 +252,16 @@ class APIServer:
 
             self.mission_executor.stop()
 
-            # Land and disarm
-            self.fc.land()
+            # Land if flying, then always disarm
+            if self.fc.state_machine.is_flying:
+                self.fc.land()
+                # Wait a bit for landing to initiate
+                time.sleep(0.5)
 
-            return jsonify({'success': True, 'message': 'Mission stopped, landing initiated'})
+            # Always disarm when stopping mission
+            self.fc.disarm()
+
+            return jsonify({'success': True, 'message': 'Mission stopped, drone disarmed'})
 
         # ==================== Diagnostics ====================
 

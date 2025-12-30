@@ -209,3 +209,29 @@ hover_learn:
   # Persistence
   save_on_disarm: true
   save_file: "hover_throttle.json"
+
+# Landing settings (iNav-style 3-phase landing)
+landing:
+  # Descent speeds per phase (m/s)
+  speed_high: 1.5               # Phase haute (> 5m AGL)
+  speed_mid: 0.7                # Phase moyenne (1-5m AGL)
+  speed_final: 0.3              # Phase finale (< 1m AGL)
+
+  # Altitude thresholds (meters AGL)
+  threshold_high: 5.0           # Switch to mid phase below this
+  threshold_mid: 1.0            # Switch to final phase below this
+
+  # Touchdown detection - Accelerometer (primary)
+  acc_threshold_g: 1.5          # Acceleration spike threshold (in G above baseline)
+  acc_filter_hz: 5.0            # Low-pass filter for accelerometer
+  touchdown_alt_max: 0.5        # Max altitude for touchdown detection
+  touchdown_confirm_time: 0.5   # Seconds to confirm touchdown
+
+  # Touchdown detection - Fallback (altitude + vario)
+  fallback_alt_threshold: 0.3   # meters
+  fallback_vario_threshold: 0.2 # m/s
+  fallback_confirm_time: 2.0    # seconds
+
+  # Auto-disarm after landing
+  auto_disarm: true
+  disarm_delay: 2.0             # seconds after touchdown confirmed

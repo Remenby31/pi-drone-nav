@@ -75,8 +75,8 @@ class FlightStateMachine:
 
         # State timeouts (0 = no timeout)
         self._timeouts: Dict[FlightState, float] = {
-            FlightState.TAKEOFF: 30.0,    # 30s max for takeoff
-            FlightState.LANDING: 60.0,    # 60s max for landing
+            FlightState.TAKEOFF: 10.0,    # 10s max for takeoff (was 30s)
+            FlightState.LANDING: 20.0,    # 20s max for landing (was 60s)
         }
 
     @property

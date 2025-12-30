@@ -1,66 +1,50 @@
 {
+  "version": "1.0",
   "name": "Sample Square Mission",
   "description": "A simple square pattern mission for testing",
-  "default_speed": 5.0,
-  "return_to_home": true,
-  "waypoints": [
-    {
-      "latitude": 48.8566,
-      "longitude": 2.3522,
-      "altitude": 10.0,
-      "action": "TAKEOFF",
-      "radius": 2.0,
-      "speed": 3.0,
-      "hover_time": 0
-    },
-    {
-      "latitude": 48.8570,
-      "longitude": 2.3522,
-      "altitude": 15.0,
-      "action": "FLY_THROUGH",
-      "radius": 3.0,
-      "speed": 5.0,
-      "hover_time": 0
-    },
-    {
-      "latitude": 48.8570,
-      "longitude": 2.3530,
-      "altitude": 15.0,
-      "action": "FLY_THROUGH",
-      "radius": 3.0,
-      "speed": 5.0,
-      "hover_time": 0
-    },
-    {
-      "latitude": 48.8566,
-      "longitude": 2.3530,
-      "altitude": 15.0,
-      "action": "HOVER",
-      "radius": 2.0,
-      "speed": 5.0,
-      "hover_time": 5
-    },
-    {
-      "latitude": 48.8566,
-      "longitude": 2.3522,
-      "altitude": 10.0,
-      "action": "LAND",
-      "radius": 2.0,
-      "speed": 3.0,
-      "hover_time": 0
-    }
-  ],
-  "geofence": {
-    "enabled": true,
-    "center_latitude": 48.8568,
-    "center_longitude": 2.3526,
-    "radius": 200.0,
-    "max_altitude": 50.0
+  "defaults": {
+    "speed": 5.0,
+    "alt": 15.0
   },
-  "safety": {
-    "min_altitude": 5.0,
-    "max_altitude": 50.0,
-    "abort_on_gps_loss": true,
-    "abort_on_low_battery": true
-  }
+  "actions": [
+    {
+      "type": "takeoff",
+      "alt": 10.0
+    },
+    {
+      "type": "goto",
+      "lat": 48.8570,
+      "lon": 2.3522,
+      "alt": 15.0,
+      "speed": 5.0
+    },
+    {
+      "type": "goto",
+      "lat": 48.8570,
+      "lon": 2.3530,
+      "alt": 15.0,
+      "speed": 5.0
+    },
+    {
+      "type": "goto",
+      "lat": 48.8566,
+      "lon": 2.3530,
+      "alt": 15.0,
+      "speed": 5.0
+    },
+    {
+      "type": "hover",
+      "duration": 5.0
+    },
+    {
+      "type": "goto",
+      "lat": 48.8566,
+      "lon": 2.3522,
+      "alt": 10.0,
+      "speed": 3.0
+    },
+    {
+      "type": "land"
+    }
+  ]
 }

@@ -34,6 +34,11 @@ def signal_handler(signum, frame):
             _flight_controller.land()
             time.sleep(5)  # Give time to land
 
+        # Always disarm on shutdown (safety)
+        if _flight_controller._armed:
+            logging.info("Disarming on shutdown...")
+            _flight_controller.disarm()
+
         _flight_controller.shutdown()
 
     sys.exit(0)
