@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test de la procédure de décollage améliorée
+Test de la procédure de décollage iNav-style
 ATTENTION: Tester SANS HELICES uniquement!
 """
 
@@ -12,8 +12,7 @@ from src.drivers.msp import MSPClient
 from src.drivers.serial_manager import SerialManager
 from src.config import get_config, TakeoffConfig
 from src.flight.preflight_checks import PreflightChecker, CheckResult
-from src.flight.takeoff_controller import TakeoffController, TakeoffPhase
-from src.navigation.altitude_controller import AltitudeController
+from src.navigation.takeoff_controller import TakeoffController, TakeoffState
 
 # Configuration
 PORT = "/dev/ttyACM0"
@@ -90,20 +89,20 @@ def test_preflight(msp):
 
 
 def test_motor_spinup(msp):
-    """Test motor spinup phase"""
+    """Test motor spinup phase (iNav-style)"""
     print("\n" + "="*50)
-    print("3. TEST MOTOR SPINUP")
+    print("3. TEST MOTOR SPINUP (iNav-style)")
     print("="*50)
 
     input("\n⚠️  ATTENTION: Les moteurs vont tourner!\nAppuyez sur Entrée pour continuer (Ctrl+C pour annuler)...")
 
     config = TakeoffConfig()
     spinup_time = config.spinup_time_ms / 1000.0
-    initial_throttle = config.initial_throttle
+    spinup_throttle = config.spinup_throttle
 
-    print(f"\nConfiguration:")
+    print(f"\nConfiguration (iNav-style):")
     print(f"  Durée spinup: {config.spinup_time_ms}ms")
-    print(f"  Throttle initial: {initial_throttle}")
+    print(f"  Throttle spinup: {spinup_throttle}")
 
     # RC channels array
     # [Roll, Pitch, Throttle, Yaw, AUX1, AUX2, AUX3, AUX4]
@@ -125,7 +124,7 @@ def test_motor_spinup(msp):
         while True:
             elapsed = time.time() - start_time
             progress = min(1.0, elapsed / spinup_time)
-            throttle = initial_throttle * progress
+            throttle = spinup_throttle * progress
 
             channels = set_rc(throttle)
             motors = msp.get_motor_values()
@@ -143,7 +142,7 @@ def test_motor_spinup(msp):
         print("\nMaintien 1 seconde...")
         hold_start = time.time()
         while time.time() - hold_start < 1.0:
-            set_rc(initial_throttle)
+            set_rc(spinup_throttle)
             time.sleep(0.02)
 
         return True
@@ -160,20 +159,22 @@ def test_motor_spinup(msp):
         print("✓ Moteurs arrêtés")
 
 
-def test_throttle_ramp(msp):
-    """Test throttle ramp phase"""
+def test_velocity_pid(msp):
+    """Test velocity PID phase (iNav-style)"""
     print("\n" + "="*50)
-    print("4. TEST THROTTLE RAMP")
+    print("4. TEST VELOCITY PID (iNav-style)")
     print("="*50)
 
     input("\n⚠️  Les moteurs vont accélérer progressivement!\nAppuyez sur Entrée pour continuer (Ctrl+C pour annuler)...")
 
     config = TakeoffConfig()
+    hover_throttle = 0.5  # Assumed hover throttle
 
-    print(f"\nConfiguration:")
-    print(f"  Initial throttle: {config.initial_throttle}")
-    print(f"  Ramp rate: {config.ramp_rate_per_sec}/s")
-    print(f"  Max ramp throttle: {config.max_ramp_throttle}")
+    print(f"\nConfiguration iNav-style:")
+    print(f"  Hover throttle: {hover_throttle}")
+    print(f"  Target climb rate: {config.target_climb_rate_ms} m/s")
+    print(f"  PID: Kp={config.vel_kp}, Ki={config.vel_ki}, Kd={config.vel_kd}")
+    print(f"  Max throttle: {config.max_throttle}")
 
     RC_CENTER = 1500
     RC_LOW = 1000
@@ -186,38 +187,49 @@ def test_throttle_ramp(msp):
         return channels
 
     try:
-        throttle = config.initial_throttle
-        throttle_rate = 0.0
-        max_jerk = 0.5
+        # PID state
+        integral = 0.0
+        prev_error = 0.0
         dt = 0.02
+        target_rate = config.target_climb_rate_ms
 
-        print("\nPhase THROTTLE_RAMP (5 secondes max):")
+        print("\nPhase VELOCITY_PID (5 secondes max):")
+        print("Note: Sans vol, le PID augmente throttle car climb_rate=0")
         start_time = time.time()
 
         while time.time() - start_time < 5.0:
-            # Jerk-limited ramp
-            target_rate = config.ramp_rate_per_sec
-            rate_error = target_rate - throttle_rate
-            max_rate_change = max_jerk * dt
-            rate_change = max(-max_rate_change, min(max_rate_change, rate_error))
-            throttle_rate += rate_change
+            # Read vario (climb rate) - will be ~0 on ground
+            altitude_data = msp.get_altitude()
+            climb_rate = altitude_data.vario_cms / 100.0 if altitude_data else 0
 
-            throttle += throttle_rate * dt
-            throttle = min(throttle, config.max_ramp_throttle)
+            # PID calculation
+            error = target_rate - climb_rate
+            p_term = config.vel_kp * error
+            integral += error * dt
+            integral = max(-config.vel_i_max, min(config.vel_i_max, integral))
+            i_term = config.vel_ki * integral
+            d_term = config.vel_kd * (error - prev_error) / dt if dt > 0 else 0
+            prev_error = error
+
+            pid_correction = p_term + i_term + d_term
+
+            # iNav formula: throttle = hover + PID
+            throttle = hover_throttle + pid_correction
+            throttle = max(config.min_throttle, min(config.max_throttle, throttle))
 
             channels = set_rc(throttle)
             motors = msp.get_motor_values()
 
             elapsed = time.time() - start_time
-            print(f"\r  Time: {elapsed:4.1f}s | Throttle: {throttle:.3f} | Rate: {throttle_rate:.3f}/s | RC: {channels[2]} | Motors: {motors}", end="")
+            print(f"\r  [{elapsed:4.1f}s] Thr: {throttle:.3f} | PID: P={p_term:+.3f} I={i_term:+.3f} D={d_term:+.3f} | Vario: {climb_rate:+.2f} | RC: {channels[2]}", end="")
 
-            if throttle >= config.max_ramp_throttle:
+            if throttle >= config.max_throttle:
                 print("\n\n⚠️  Max throttle atteint!")
                 break
 
             time.sleep(dt)
 
-        print("\n\n✓ Ramp terminé")
+        print("\n\n✓ Test PID terminé")
         return True
 
     except KeyboardInterrupt:
@@ -233,19 +245,21 @@ def test_throttle_ramp(msp):
 
 
 def test_full_sequence(msp):
-    """Test full takeoff sequence with TakeoffController"""
+    """Test full takeoff sequence with iNav-style TakeoffController"""
     print("\n" + "="*50)
-    print("5. TEST SÉQUENCE COMPLÈTE (sans vol)")
+    print("5. TEST SÉQUENCE COMPLÈTE iNav-style (sans vol)")
     print("="*50)
 
     print("\nCe test simule la séquence complète mais sans décoller")
-    print("(le drone reste au sol, pas de détection liftoff)")
+    print("(le drone reste au sol, pas de détection liftoff via gyro)")
+    print("\nLe PID va augmenter le throttle jusqu'à max_throttle,")
+    print("puis timeout après 10s car pas de liftoff détecté.")
 
     input("\nAppuyez sur Entrée pour continuer (Ctrl+C pour annuler)...")
 
     config = get_config()
-    alt_controller = AltitudeController()
-    takeoff = TakeoffController(config.takeoff, alt_controller)
+    hover_throttle = 0.5  # Initial guess
+    takeoff = TakeoffController(config.takeoff, hover_throttle=hover_throttle)
 
     RC_CENTER = 1500
     RC_LOW = 1000
@@ -276,29 +290,37 @@ def test_full_sequence(msp):
 
     try:
         # Start takeoff
-        takeoff.start(target_altitude_m=3.0)
+        takeoff.start(target_altitude_m=3.0, ground_altitude_m=0.0)
         print(f"\nTarget altitude: 3.0m")
-        print(f"Starting phase: {takeoff.phase.name}")
+        print(f"Hover throttle: {hover_throttle}")
+        print(f"Starting state: {takeoff.state.name}")
 
         dt = 0.02
         start_time = time.time()
-        max_time = 10.0  # Max 10 seconds for test
+        max_time = 12.0  # Max 12 seconds for test (> timeout_s)
 
         while time.time() - start_time < max_time:
             # Get sensor data
             attitude = msp.get_attitude()
             altitude_data = msp.get_altitude()
+            imu = msp.get_raw_imu()
 
             roll = attitude.roll if attitude else 0
             pitch = attitude.pitch if attitude else 0
             altitude_m = altitude_data.altitude_cm / 100.0 if altitude_data else 0
             climb_rate = altitude_data.vario_cms / 100.0 if altitude_data else 0
+            gyro_x = imu.gyro_x if imu else 0
+            gyro_y = imu.gyro_y if imu else 0
+            gyro_z = imu.gyro_z if imu else 0
 
-            # Update takeoff controller
+            # Update iNav-style takeoff controller
             throttle = takeoff.update(
                 dt=dt,
                 altitude_m=altitude_m,
                 climb_rate_ms=climb_rate,
+                gyro_x=gyro_x,
+                gyro_y=gyro_y,
+                gyro_z=gyro_z,
                 roll_deg=roll,
                 pitch_deg=pitch
             )
@@ -312,14 +334,15 @@ def test_full_sequence(msp):
             # Print status
             elapsed = time.time() - start_time
             status = takeoff.get_status()
-            print(f"\r  [{elapsed:5.1f}s] Phase: {status['phase']:15} | Throttle: {throttle:.3f} | Alt: {altitude_m:5.2f}m | Climb: {climb_rate:+5.2f}m/s", end="")
+            gyro_mag = (gyro_x**2 + gyro_y**2 + gyro_z**2)**0.5 / 16.4  # deg/s
+            print(f"\r  [{elapsed:5.1f}s] State: {status['state']:10} | Thr: {throttle:.3f} | Gyro: {gyro_mag:5.1f}dps | Liftoff: {'Y' if status['liftoff_detected'] else 'N'}", end="")
 
             # Check if done
             if completed[0] or aborted[0]:
                 break
 
             if not takeoff.is_active:
-                print(f"\n\nTakeoff terminé - Phase finale: {takeoff.phase.name}")
+                print(f"\n\nTakeoff terminé - État final: {takeoff.state.name}")
                 break
 
             time.sleep(dt)
@@ -341,7 +364,7 @@ def test_full_sequence(msp):
 
 def main():
     print("="*50)
-    print("  TEST PROCÉDURE DE DÉCOLLAGE AMÉLIORÉE")
+    print("  TEST DÉCOLLAGE iNav-style")
     print("  ⚠️  SANS HÉLICES UNIQUEMENT!")
     print("="*50)
 
@@ -357,11 +380,11 @@ def main():
         # Menu
         while True:
             print("\n" + "-"*50)
-            print("Options de test:")
+            print("Options de test (iNav-style):")
             print("  1. Re-test pre-flight checks")
             print("  2. Test motor spinup (500ms)")
-            print("  3. Test throttle ramp (5s max)")
-            print("  4. Test séquence complète")
+            print("  3. Test velocity PID (5s max)")
+            print("  4. Test séquence complète iNav")
             print("  5. Lire valeurs moteurs")
             print("  q. Quitter")
             print("-"*50)
@@ -373,7 +396,7 @@ def main():
             elif choice == '2':
                 test_motor_spinup(msp)
             elif choice == '3':
-                test_throttle_ramp(msp)
+                test_velocity_pid(msp)
             elif choice == '4':
                 test_full_sequence(msp)
             elif choice == '5':

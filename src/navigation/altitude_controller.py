@@ -91,11 +91,12 @@ class AltitudeController:
         self.alt_p_gain = nav.alt_p_gain
 
         # Climb rate to throttle (PID)
+        # Gains harmonized with takeoff controller for 50Hz MSP
         climb_gains = PIDGains(
-            kp=nav.climb_rate_p_gain * 0.01,  # Scale for throttle output
-            ki=0.02,
-            kd=0.0,
-            i_max=nav.throttle_margin
+            kp=0.15,   # Same as takeoff
+            ki=0.05,   # Same as takeoff
+            kd=0.02,   # Same as takeoff
+            i_max=0.2  # Anti-windup limit
         )
         self.climb_pid = PIDController(climb_gains)
         self.climb_pid.set_output_limits(-nav.throttle_margin, nav.throttle_margin)

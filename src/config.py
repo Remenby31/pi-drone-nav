@@ -185,32 +185,40 @@ class SimulationConfig:
 
 @dataclass
 class TakeoffConfig:
-    """Takeoff sequence configuration (iNav/ArduPilot style)"""
+    """
+    Takeoff configuration - iNav-style velocity PID
 
-    # Target altitude
+    Adapted for MSP control frequency (25-50Hz vs iNav's 100-500Hz):
+    - PID gains halved from iNav defaults
+    - Filter cutoff reduced to 2Hz (iNav uses 4Hz)
+    """
+
+    # Target
     default_altitude_m: float = 3.0
+    target_climb_rate_ms: float = 0.2  # m/s target climb rate during takeoff (20cm/s for testing)
 
-    # Phase timing
+    # Spinup phase
     spinup_time_ms: int = 500           # Motor spinup duration
-    stabilize_time_ms: int = 1000       # Post-climb stabilization
+    spinup_throttle: float = 0.15       # Throttle at end of spinup
 
-    # Throttle ramping
-    initial_throttle: float = 0.15      # Starting throttle (below hover)
-    ramp_rate_per_sec: float = 0.3      # Throttle increase rate
-    max_ramp_throttle: float = 0.7      # Max throttle during ramp (safety)
+    # Velocity PID (adapted for 50Hz MSP)
+    vel_kp: float = 0.15                # Half of iNav's 0.30
+    vel_ki: float = 0.05                # Half of iNav's 0.10
+    vel_kd: float = 0.02                # Half of iNav's 0.05
+    vel_i_max: float = 0.2              # Anti-windup limit
+    velocity_filter_hz: float = 2.0     # Low-pass filter (iNav uses 4Hz)
 
-    # Liftoff detection
-    liftoff_altitude_threshold_m: float = 0.3    # Min altitude to confirm liftoff
-    liftoff_climb_rate_threshold_ms: float = 0.2 # Min climb rate to confirm
-    liftoff_timeout_ms: int = 5000      # Abort if no liftoff
+    # Liftoff detection (iNav-style: throttle + gyro)
+    liftoff_gyro_threshold_dps: float = 7.0   # Gyro magnitude threshold (deg/s)
+    liftoff_throttle_margin: float = 0.05     # Throttle must be > hover + margin
+    liftoff_confirm_time_s: float = 0.2       # 200ms confirmation
 
-    # Ground effect compensation
-    ground_effect_height_m: float = 1.0   # Height where ground effect diminishes
-    ground_effect_throttle_boost: float = 0.05  # Extra throttle near ground
-
-    # Abort conditions
-    max_tilt_abort_deg: float = 30.0    # Abort if tilted too much
-    altitude_loss_abort_m: float = 0.5  # Abort if losing altitude during climb
+    # Safety limits
+    max_throttle: float = 0.75          # Never exceed this during takeoff
+    min_throttle: float = 0.1           # Never go below this
+    max_tilt_deg: float = 25.0          # Abort if tilted more
+    timeout_s: float = 10.0             # Abort if no liftoff after this
+    altitude_tolerance_m: float = 0.5   # Close enough to target
 
     # Pre-flight checks
     preflight_enabled: bool = True

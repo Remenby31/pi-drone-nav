@@ -10,8 +10,8 @@ from typing import Optional, Tuple
 import logging
 
 from .state_machine import FlightStateMachine, FlightState
-from .takeoff_controller import TakeoffController, TakeoffPhase
 from .preflight_checks import PreflightChecker, PreflightResult
+from ..navigation.takeoff_controller import TakeoffController, TakeoffState
 from .hover_throttle_learner import HoverThrottleLearner
 from ..drivers.msp import MSPClient, MSPError
 from ..drivers.gps_ubx import GPSDriver, GPSFix
@@ -84,8 +84,9 @@ class FlightController:
         # GPS source tracking
         self._use_msp_gps = False  # True if using GPS via MSP (fallback)
 
-        # RC output
-        self._rc_channels = [1500] * 8
+        # RC output - initialize with safe disarmed values
+        # [Roll, Pitch, Throttle, Yaw, AUX1, AUX2, AUX3, AUX4]
+        self._rc_channels = [1500, 1500, 885, 1500, 1000, 1500, 1500, 1500]
 
         # Telemetry
         self._last_gps_fix: Optional[GPSFix] = None
@@ -151,8 +152,11 @@ class FlightController:
             # Initialize takeoff system
             self.preflight_checker = PreflightChecker(self.config.takeoff)
             self.hover_learner = HoverThrottleLearner(self.config.hover_learn)
+
+            # Initialize iNav-style takeoff controller
+            initial_hover = self.hover_learner.hover_throttle if self.hover_learner else 0.5
             self.takeoff_controller = TakeoffController(
-                self.config.takeoff, self.alt_controller
+                self.config.takeoff, hover_throttle=initial_hover
             )
 
             # Setup takeoff callbacks
@@ -262,12 +266,12 @@ class FlightController:
 
         # Update altitude controller with learned hover throttle if available
         if self.hover_learner and self.takeoff_controller:
-            throttle_at_liftoff = self.takeoff_controller.state.throttle_at_liftoff
+            throttle_at_liftoff = self.takeoff_controller.throttle_at_liftoff
             if throttle_at_liftoff > 0:
                 # Use liftoff throttle as initial estimate for hover learning
                 self.hover_learner.reset(throttle_at_liftoff)
                 self.alt_controller.calibrate_hover_throttle(throttle_at_liftoff)
-                logger.info(f"Initial hover throttle estimate: {throttle_at_liftoff:.2f}")
+                logger.info(f"Hover throttle from takeoff: {throttle_at_liftoff:.2f}")
 
         self.state_machine.transition_to(FlightState.POSITION_HOLD)
 
@@ -332,10 +336,20 @@ class FlightController:
         # State-specific updates
         state = self.state_machine.state
 
-        if state == FlightState.IDLE or state == FlightState.ERROR:
-            return  # No control in these states
+        if state == FlightState.ERROR:
+            return  # No control in error state
 
-        if state == FlightState.TAKEOFF:
+        # In IDLE, still send RC to prevent RXLOSS (but with disarm values)
+        if state == FlightState.IDLE:
+            self._send_rc_commands()  # Keep RX alive
+            return
+
+        # Handle mission executor for ARMED state (to trigger takeoff)
+        if state == FlightState.ARMED and self.mission_executor.state == ExecutorState.RUNNING:
+            self._update_mission(dt)
+            # Don't return - need to send RC commands below
+
+        elif state == FlightState.TAKEOFF:
             self._update_takeoff(dt)
 
         elif state == FlightState.HOVER or state == FlightState.POSITION_HOLD:
@@ -450,7 +464,11 @@ class FlightController:
                 self.state_machine.trigger_failsafe("Landing timeout")
 
     def _update_takeoff(self, dt: float):
-        """Update takeoff sequence using TakeoffController"""
+        """
+        Update takeoff sequence using iNav-style TakeoffController
+
+        Reads gyro data from MSP_RAW_IMU for liftoff detection.
+        """
         if not self.takeoff_controller:
             # Fallback to simple takeoff if controller not available
             self.alt_controller.set_target_altitude(self._target_altitude)
@@ -466,11 +484,23 @@ class FlightController:
         roll = self._last_attitude.roll if self._last_attitude else 0
         pitch = self._last_attitude.pitch if self._last_attitude else 0
 
-        # Update takeoff controller
+        # Read gyro for iNav-style liftoff detection
+        gyro_x, gyro_y, gyro_z = 0, 0, 0
+        if self.msp:
+            try:
+                imu = self.msp.get_raw_imu()
+                gyro_x, gyro_y, gyro_z = imu.gyro_x, imu.gyro_y, imu.gyro_z
+            except MSPError as e:
+                logger.warning(f"Failed to read IMU for takeoff: {e}")
+
+        # Update iNav-style takeoff controller
         throttle = self.takeoff_controller.update(
             dt=dt,
             altitude_m=altitude,
             climb_rate_ms=climb_rate,
+            gyro_x=gyro_x,
+            gyro_y=gyro_y,
+            gyro_z=gyro_z,
             roll_deg=roll,
             pitch_deg=pitch
         )
@@ -863,9 +893,14 @@ class FlightController:
                 self.alt_controller.current_altitude
             )
 
-        # Start takeoff controller
+        # Start iNav-style takeoff controller
         if self.takeoff_controller:
-            self.takeoff_controller.start(altitude)
+            # Update hover throttle from learner
+            if self.hover_learner:
+                self.takeoff_controller.set_hover_throttle(self.hover_learner.hover_throttle)
+
+            ground_alt = self.alt_controller.current_altitude
+            self.takeoff_controller.start(altitude, ground_altitude_m=ground_alt)
 
         return self.state_machine.transition_to(FlightState.TAKEOFF)
 

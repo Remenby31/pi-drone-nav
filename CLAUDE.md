@@ -71,6 +71,7 @@ MSP_SET_RAW_RC → Betaflight (Angle Mode) → Motors
   - `position_controller.py` - GPS position → velocity setpoint
   - `velocity_controller.py` - Velocity → acceleration → pitch/roll angles
   - `altitude_controller.py` - Altitude hold, throttle control, **iNav-style landing**
+  - `takeoff_controller.py` - **iNav-style takeoff** with velocity PID and gyro liftoff detection
   - `waypoint_navigator.py` - Mission execution with fly-through/hover modes
 
 - **`src/flight/`** - Flight orchestration
@@ -195,6 +196,136 @@ When landing is active, telemetry includes:
 | Rangefinder support | ✗ | ✓ | ✓ |
 | Terrain following | ✗ | ✓ | ✓ |
 | Precision landing | ✗ | ✗ | ✓ |
+
+## Takeoff System (iNav-style) - Implemented 30 Dec 2025
+
+### Overview
+
+The takeoff system uses an iNav-inspired velocity PID approach instead of the original open-loop throttle ramp. This adapts automatically to drone weight and detects instability via gyroscope.
+
+### Key Differences from Original System
+
+| Aspect | Original (6-phase) | iNav-style (3-state) |
+|--------|-------------------|---------------------|
+| Throttle control | Open-loop ramp | Velocity PID |
+| Adapts to weight | No | Yes |
+| Instability detection | No | Yes (gyro) |
+| States | 6 phases | 3 states |
+| Liftoff detection | Alt + climb rate | Throttle + gyro |
+
+### States
+
+```
+SPINUP (500ms)    →  Linear ramp 0% → 15%
+       ↓
+CLIMBING          →  Velocity PID active: throttle = hover + PID(target - actual)
+       ↓
+COMPLETE/ABORTED  →  Success or timeout/tilt abort
+```
+
+### Liftoff Detection (iNav-style)
+
+Both conditions must be true for 200ms:
+```python
+throttle > hover_throttle + 0.05  # Throttle above hover
+AND
+gyro_magnitude > 7.0 deg/s        # Drone actually moving
+```
+
+This is more reliable than altitude-only detection because it confirms the drone is actually leaving the ground.
+
+### MSP Frequency Adaptation
+
+PID gains reduced for 50Hz MSP control (vs iNav's 100-500Hz):
+
+| Parameter | iNav (100Hz) | pi_drone_nav (50Hz) |
+|-----------|-------------|---------------------|
+| Kp | 0.30 | 0.15 |
+| Ki | 0.10 | 0.05 |
+| Kd | 0.05 | 0.02 |
+| Filter cutoff | 4 Hz | 2 Hz |
+
+### Key Files
+
+| File | Function |
+|------|----------|
+| `src/navigation/takeoff_controller.py` | TakeoffController, TakeoffState |
+| `src/flight/flight_controller.py:466` | `_update_takeoff()` - reads gyro, calls controller |
+| `src/config.py` | TakeoffConfig with PID parameters |
+| `config/default.yaml` | `takeoff:` section |
+
+### Configuration
+
+```yaml
+# config/default.yaml
+takeoff:
+  # Target
+  default_altitude_m: 3.0
+  target_climb_rate_ms: 1.0     # m/s
+
+  # Velocity PID (adapted for 50Hz)
+  vel_kp: 0.15
+  vel_ki: 0.05
+  vel_kd: 0.02
+  velocity_filter_hz: 2.0
+
+  # Liftoff detection (iNav-style)
+  liftoff_gyro_threshold_dps: 7.0
+  liftoff_throttle_margin: 0.05
+  liftoff_confirm_time_s: 0.2
+
+  # Safety
+  max_throttle: 0.75
+  max_tilt_deg: 25.0
+  timeout_s: 10.0
+```
+
+### API
+
+```python
+# Initialize with hover throttle estimate
+takeoff = TakeoffController(config.takeoff, hover_throttle=0.5)
+
+# Start takeoff
+takeoff.start(target_altitude_m=3.0, ground_altitude_m=0.0)
+
+# Update loop (called at 50Hz)
+throttle = takeoff.update(
+    dt=0.02,
+    altitude_m=current_alt,
+    climb_rate_ms=vario,
+    gyro_x=imu.gyro_x,
+    gyro_y=imu.gyro_y,
+    gyro_z=imu.gyro_z,
+    roll_deg=attitude.roll,
+    pitch_deg=attitude.pitch
+)
+
+# Check state
+takeoff.is_active        # True if SPINUP or CLIMBING
+takeoff.liftoff_detected # True if liftoff confirmed
+takeoff.state            # TakeoffState enum
+```
+
+### Propless Test Behavior
+
+Without flight:
+1. SPINUP (500ms): 0% → 15%
+2. CLIMBING: PID increases throttle seeking 1m/s climb rate
+3. Without actual climb, throttle rises toward max_throttle (75%)
+4. After timeout_s (10s), aborts due to no liftoff (gyro < 7°/s)
+
+### Test Script
+
+```bash
+python scripts/test_takeoff.py
+# Options:
+# 2. Test motor spinup (500ms)
+# 3. Test velocity PID (5s max)
+# 4. Test séquence complète iNav
+```
+
+---
 
 ## GPS Sources
 
@@ -695,12 +826,12 @@ ACC_SCALE updated in `altitude_controller.py:345`
 ## Raspberry Pi Connection
 
 ```
-IP: 192.168.1.80
+IP: 192.168.1.114
 User: drone
 Password: drone
 ```
 
-SSH: `ssh drone@192.168.1.80`
+SSH: `ssh drone@192.168.1.114`
 
 ---
 
@@ -773,27 +904,42 @@ Vérifié: drone pointant nord réel → heading affiché 359° (correct)
 
 ---
 
-## TODO - Test Glissière (Prochaine étape)
+## Test Glissière - INCIDENT (30 Dec 2025) - RÉSOLU
 
-### Objectif
-Test sur glissière verticale: décollage → hover 2m → atterrissage
+### Ce qui s'est passé
 
-### Séquence automatique
-```
-1. SPINUP (500ms)     : 0% → 15% throttle
-2. THROTTLE_RAMP      : +30%/sec jusqu'à liftoff (max 70%)
-3. LIFTOFF_DETECT     : altitude > 0.3m ET climb > 0.2m/s
-4. CLIMB              : Monte vers 2m
-5. HOVER (3s)         : Stabilise + hover learning
-6. LAND               : Descente 3 phases (1.5/0.7/0.3 m/s)
-7. TOUCHDOWN          : Détection accéléromètre
-8. DISARM             : Auto après 2s
-```
+**Mission**: Test Hover 1m sur glissière verticale
 
-### Commandes
+**Problèmes rencontrés**:
+1. **RXLOSS** bloquait l'armement → corrigé en envoyant RC même en IDLE
+2. **hover_throttle = 0.20** (20%) au lieu de 0.50 → système a compensé en montant throttle trop vite
+3. **ramp_rate = 0.30/s** trop rapide pour un premier test
+4. Drone monté à **1m80** au lieu de 1m, inclinaison **36.8°** → abort
+5. **Glissière cassée**, drone atterri sur les opérateurs
+
+### Bugs corrigés (flight_controller.py)
+
+1. **RC en IDLE** : Ajout envoi RC continu même en état IDLE pour éviter RXLOSS
+2. **Init RC channels** : Valeurs désarmées par défaut `[1500,1500,885,1500,1000,...]`
+3. **ARMED + mission** : Handling de l'état ARMED quand mission active
+
+### Solution: iNav-style Takeoff - IMPLÉMENTÉ
+
+L'ancien système (6-phase avec ramp) a été **remplacé** par le système iNav-style:
+
+- **Throttle = hover_throttle + velocity_PID** (s'adapte au poids)
+- **Détection liftoff via gyro > 7°/s** (détecte l'instabilité)
+- **3 états simples** au lieu de 6 phases
+
+Voir section "Takeoff System (iNav-style)" ci-dessus pour détails.
+
+---
+
+## Commandes Raspberry
+
 ```bash
 # SSH vers Raspberry
-ssh drone@192.168.1.80
+ssh drone@192.168.1.114
 
 # Sur le Raspberry: Démarrer serveur
 cd ~/pi_drone_nav && git pull

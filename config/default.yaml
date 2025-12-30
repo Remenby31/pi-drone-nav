@@ -159,32 +159,35 @@ logging:
   flight_log_enabled: true
   flight_log_rate: 10  # Hz
 
-# Takeoff sequence settings (iNav/ArduPilot style)
+# Takeoff settings (iNav-style velocity PID)
+# Adapted for MSP control at 50Hz (vs iNav's 100-500Hz native loop)
 takeoff:
-  # Target altitude for takeoff (m)
+  # Target
   default_altitude_m: 3.0
+  target_climb_rate_ms: 0.2     # Target vertical speed during climb (m/s) - 20cm/s for testing
 
-  # Phase timing (ms)
-  spinup_time_ms: 500           # Motor spinup before climb
-  stabilize_time_ms: 1000       # Stabilization after reaching altitude
+  # Spinup phase
+  spinup_time_ms: 500           # Motor spinup before PID engages
+  spinup_throttle: 0.15         # Throttle at end of spinup
 
-  # Throttle ramping
-  initial_throttle: 0.15        # Starting throttle (below hover)
-  ramp_rate_per_sec: 0.3        # Throttle increase rate
-  max_ramp_throttle: 0.7        # Safety limit during ramp
+  # Velocity PID (gains halved from iNav for 50Hz MSP)
+  vel_kp: 0.15                  # iNav uses 0.30 at 100Hz
+  vel_ki: 0.05                  # iNav uses 0.10 at 100Hz
+  vel_kd: 0.02                  # iNav uses 0.05 at 100Hz
+  vel_i_max: 0.2                # Anti-windup limit
+  velocity_filter_hz: 2.0       # Low-pass filter (iNav uses 4Hz)
 
-  # Liftoff detection thresholds
-  liftoff_altitude_threshold_m: 0.3    # Min altitude to confirm liftoff
-  liftoff_climb_rate_threshold_ms: 0.2 # Min climb rate to confirm
-  liftoff_timeout_ms: 5000             # Abort if no liftoff after this
+  # Liftoff detection (iNav-style: throttle + gyro)
+  liftoff_gyro_threshold_dps: 7.0   # Gyro activity threshold (deg/s)
+  liftoff_throttle_margin: 0.05     # Must be above hover_throttle + margin
+  liftoff_confirm_time_s: 0.2       # Confirmation time (200ms)
 
-  # Ground effect compensation
-  ground_effect_height_m: 1.0          # Height where ground effect diminishes
-  ground_effect_throttle_boost: 0.05   # Extra throttle near ground
-
-  # Abort conditions
-  max_tilt_abort_deg: 30.0      # Abort if tilted more than this
-  altitude_loss_abort_m: 0.5    # Abort if altitude drops during climb
+  # Safety limits
+  max_throttle: 0.75            # Never exceed during takeoff
+  min_throttle: 0.1             # Never go below
+  max_tilt_deg: 25.0            # Abort if tilted more
+  timeout_s: 10.0               # Abort if no liftoff
+  altitude_tolerance_m: 0.5     # Close enough to target
 
   # Pre-flight checks
   preflight_enabled: true
