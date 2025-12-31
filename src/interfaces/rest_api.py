@@ -356,6 +356,52 @@ class APIServer:
             self.fc.serial_manager.disconnect()
             return jsonify({'success': True})
 
+        # ==================== Emergency ====================
+
+        @self.app.route('/api/emergency/disarm', methods=['POST'])
+        def emergency_disarm():
+            """
+            Emergency disarm - immediately stops motors
+
+            This is the panic button. Use when something goes wrong.
+            """
+            logger.warning("!!! EMERGENCY DISARM REQUESTED !!!")
+
+            try:
+                # Stop any active mission first
+                if self.mission_executor and self.mission_executor.state.name == 'RUNNING':
+                    self.mission_executor.stop()
+
+                # Force disarm
+                self.fc.disarm()
+
+                # Send disarm RC command directly to ensure motors stop
+                if self.fc.msp:
+                    # AUX1 = 1000 (disarm), throttle = minimum
+                    disarm_rc = [1500, 1500, 885, 1500, 1000, 1000, 1500, 1500]
+                    for _ in range(10):  # Send multiple times to ensure it's received
+                        self.fc.msp.set_raw_rc(disarm_rc)
+
+                logger.warning("Emergency disarm completed")
+                return jsonify({'success': True, 'message': 'DISARMED'})
+
+            except Exception as e:
+                logger.error(f"Emergency disarm failed: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/arm', methods=['POST'])
+        def arm():
+            """Arm the drone"""
+            if self.fc.arm():
+                return jsonify({'success': True, 'message': 'Armed'})
+            return jsonify({'success': False, 'error': 'Arm failed'}), 400
+
+        @self.app.route('/api/disarm', methods=['POST'])
+        def disarm():
+            """Disarm the drone (normal disarm)"""
+            self.fc.disarm()
+            return jsonify({'success': True, 'message': 'Disarmed'})
+
         # ==================== Configuration ====================
 
         @self.app.route('/api/config', methods=['GET'])
