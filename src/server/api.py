@@ -263,6 +263,50 @@ class APIServer:
 
             return jsonify({'success': True, 'message': 'Mission stopped, drone disarmed'})
 
+        # ==================== Emergency ====================
+
+        @self.app.route('/api/emergency/disarm', methods=['POST'])
+        def emergency_disarm():
+            """
+            Emergency disarm - immediately cuts motors
+
+            Does NOT attempt to land. Use only in emergencies.
+            For normal operations, use /api/missions/active/stop instead.
+            """
+            try:
+                logger.warning("EMERGENCY DISARM requested")
+
+                # Stop any active mission
+                if self.mission_executor.state.name in ('RUNNING', 'PAUSED'):
+                    self.mission_executor.stop()
+
+                # Force disarm via flight controller
+                self.fc.disarm()
+
+                # Send disarm RC command directly to ensure motors stop
+                if self.fc.msp:
+                    try:
+                        # AUX1 = 1000 (disarm), throttle = minimum
+                        disarm_rc = [1500, 1500, 885, 1500, 1000, 1000, 1500, 1500]
+                        for _ in range(5):  # Send multiple times for reliability
+                            self.fc.msp.set_raw_rc(disarm_rc)
+                            time.sleep(0.02)
+                    except Exception as e:
+                        logger.error(f"Failed to send disarm RC: {e}")
+
+                logger.warning("EMERGENCY DISARM completed")
+                return jsonify({
+                    'success': True,
+                    'message': 'Emergency disarm executed - motors stopped'
+                })
+
+            except Exception as e:
+                logger.error(f"Emergency disarm failed: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+
         # ==================== Diagnostics ====================
 
         @self.app.route('/api/diagnostics', methods=['GET'])
