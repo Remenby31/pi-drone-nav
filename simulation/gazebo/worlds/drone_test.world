@@ -1,0 +1,156 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="drone_test_world">
+    <!-- Physics settings -->
+    <physics type="ode">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>500</real_time_update_rate>
+    </physics>
+
+    <!-- Lighting -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- Ground plane -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <!-- Landing pad (visual reference) -->
+    <model name="landing_pad">
+      <static>true</static>
+      <pose>0 0 0.001 0 0 0</pose>
+      <link name="pad_link">
+        <visual name="pad_visual">
+          <geometry>
+            <cylinder>
+              <radius>1.0</radius>
+              <length>0.002</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.3 0.3 0.8 1</ambient>
+            <diffuse>0.3 0.3 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Waypoint markers -->
+    <model name="waypoint_1">
+      <static>true</static>
+      <pose>5 0 0.5 0 0 0</pose>
+      <link name="marker">
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>0.3</radius></sphere>
+          </geometry>
+          <material>
+            <ambient>0 1 0 0.5</ambient>
+            <diffuse>0 1 0 0.5</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="waypoint_2">
+      <static>true</static>
+      <pose>5 5 0.5 0 0 0</pose>
+      <link name="marker">
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>0.3</radius></sphere>
+          </geometry>
+          <material>
+            <ambient>1 1 0 0.5</ambient>
+            <diffuse>1 1 0 0.5</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="waypoint_3">
+      <static>true</static>
+      <pose>0 5 0.5 0 0 0</pose>
+      <link name="marker">
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>0.3</radius></sphere>
+          </geometry>
+          <material>
+            <ambient>1 0 0 0.5</ambient>
+            <diffuse>1 0 0 0.5</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Height reference poles -->
+    <model name="height_pole_1m">
+      <static>true</static>
+      <pose>-2 0 0.5 0 0 0</pose>
+      <link name="pole">
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>1.0</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="height_pole_2m">
+      <static>true</static>
+      <pose>-2 1 1.0 0 0 0</pose>
+      <link name="pole">
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>2.0</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>1 0.5 0 1</ambient>
+            <diffuse>1 0.5 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="height_pole_3m">
+      <static>true</static>
+      <pose>-2 2 1.5 0 0 0</pose>
+      <link name="pole">
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>3.0</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0 1 0 1</ambient>
+            <diffuse>0 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Camera view -->
+    <gui>
+      <camera name="user_camera">
+        <pose>-5 -5 5 0 0.5 0.8</pose>
+      </camera>
+    </gui>
+
+  </world>
+</sdf>

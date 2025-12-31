@@ -1,0 +1,393 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="quadcopter">
+    <pose>0 0 0.1 0 0 0</pose>
+
+    <!-- Main body -->
+    <link name="base_link">
+      <inertial>
+        <mass>1.5</mass>
+        <inertia>
+          <ixx>0.029</ixx>
+          <iyy>0.029</iyy>
+          <izz>0.055</izz>
+        </inertia>
+      </inertial>
+
+      <!-- Central body -->
+      <visual name="body_visual">
+        <geometry>
+          <box>
+            <size>0.15 0.15 0.05</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.3 0.3 0.3 1</diffuse>
+        </material>
+      </visual>
+
+      <collision name="body_collision">
+        <geometry>
+          <box>
+            <size>0.15 0.15 0.05</size>
+          </box>
+        </geometry>
+      </collision>
+
+      <!-- Arms -->
+      <!-- Front-Right arm -->
+      <visual name="arm_fr">
+        <pose>0.1 -0.1 0 0 0 -0.785</pose>
+        <geometry>
+          <box><size>0.2 0.02 0.01</size></box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.2 0.2 1</ambient>
+          <diffuse>0.8 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Front-Left arm -->
+      <visual name="arm_fl">
+        <pose>0.1 0.1 0 0 0 0.785</pose>
+        <geometry>
+          <box><size>0.2 0.02 0.01</size></box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.2 0.2 1</ambient>
+          <diffuse>0.8 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Back-Right arm -->
+      <visual name="arm_br">
+        <pose>-0.1 -0.1 0 0 0 0.785</pose>
+        <geometry>
+          <box><size>0.2 0.02 0.01</size></box>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.3 0.3 0.3 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Back-Left arm -->
+      <visual name="arm_bl">
+        <pose>-0.1 0.1 0 0 0 -0.785</pose>
+        <geometry>
+          <box><size>0.2 0.02 0.01</size></box>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.3 0.3 0.3 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Direction indicator (front) -->
+      <visual name="front_indicator">
+        <pose>0.1 0 0.03 0 0 0</pose>
+        <geometry>
+          <box><size>0.05 0.02 0.01</size></box>
+        </geometry>
+        <material>
+          <ambient>0 0.8 0 1</ambient>
+          <diffuse>0 0.8 0 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- Motor 0 (Front-Right, CW) -->
+    <link name="motor_0">
+      <pose>0.177 -0.177 0.02 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="motor_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.015</radius>
+            <length>0.02</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="motor_0_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>motor_0</child>
+    </joint>
+
+    <!-- Propeller 0 -->
+    <link name="prop_0">
+      <pose>0.177 -0.177 0.04 0 0 0</pose>
+      <inertial>
+        <mass>0.01</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="prop_visual">
+        <geometry>
+          <box><size>0.127 0.02 0.002</size></box>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.8</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="prop_0_joint" type="revolute">
+      <parent>motor_0</parent>
+      <child>prop_0</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+        </limit>
+      </axis>
+    </joint>
+
+    <!-- Motor 1 (Front-Left, CCW) -->
+    <link name="motor_1">
+      <pose>0.177 0.177 0.02 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="motor_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.015</radius>
+            <length>0.02</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="motor_1_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>motor_1</child>
+    </joint>
+
+    <link name="prop_1">
+      <pose>0.177 0.177 0.04 0 0 0</pose>
+      <inertial>
+        <mass>0.01</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="prop_visual">
+        <geometry>
+          <box><size>0.127 0.02 0.002</size></box>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.8</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="prop_1_joint" type="revolute">
+      <parent>motor_1</parent>
+      <child>prop_1</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+      </axis>
+    </joint>
+
+    <!-- Motor 2 (Back-Right, CCW) -->
+    <link name="motor_2">
+      <pose>-0.177 -0.177 0.02 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="motor_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.015</radius>
+            <length>0.02</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="motor_2_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>motor_2</child>
+    </joint>
+
+    <link name="prop_2">
+      <pose>-0.177 -0.177 0.04 0 0 0</pose>
+      <inertial>
+        <mass>0.01</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="prop_visual">
+        <geometry>
+          <box><size>0.127 0.02 0.002</size></box>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.8</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="prop_2_joint" type="revolute">
+      <parent>motor_2</parent>
+      <child>prop_2</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+      </axis>
+    </joint>
+
+    <!-- Motor 3 (Back-Left, CW) -->
+    <link name="motor_3">
+      <pose>-0.177 0.177 0.02 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="motor_visual">
+        <geometry>
+          <cylinder>
+            <radius>0.015</radius>
+            <length>0.02</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="motor_3_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>motor_3</child>
+    </joint>
+
+    <link name="prop_3">
+      <pose>-0.177 0.177 0.04 0 0 0</pose>
+      <inertial>
+        <mass>0.01</mass>
+        <inertia>
+          <ixx>0.00001</ixx>
+          <iyy>0.00001</iyy>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="prop_visual">
+        <geometry>
+          <box><size>0.127 0.02 0.002</size></box>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 0.8</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="prop_3_joint" type="revolute">
+      <parent>motor_3</parent>
+      <child>prop_3</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+      </axis>
+    </joint>
+
+    <!-- IMU sensor -->
+    <link name="imu_link">
+      <pose>0 0 0 0 0 0</pose>
+      <inertial>
+        <mass>0.001</mass>
+      </inertial>
+      <sensor name="imu_sensor" type="imu">
+        <always_on>true</always_on>
+        <update_rate>1000</update_rate>
+        <imu>
+          <angular_velocity>
+            <x>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>0.001</stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>0.001</stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>0.001</stddev>
+              </noise>
+            </z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>0.01</stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>0.01</stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0</mean>
+                <stddev>0.01</stddev>
+              </noise>
+            </z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </link>
+
+    <joint name="imu_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>imu_link</child>
+    </joint>
+
+  </model>
+</sdf>

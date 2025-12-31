@@ -1,0 +1,299 @@
+<?xml version="1.0"?>
+<robot name="quadcopter">
+
+  <!-- Central body - D7S Combo (Mark4 7") with Pi5 -->
+  <!-- Total mass ~900g distributed: body 620g, arms 4x20g, motors 4x54g, props 4x10g -->
+  <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.62"/>
+      <inertia ixx="0.012" ixy="0" ixz="0" iyy="0.012" iyz="0" izz="0.022"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.05"/>
+      </geometry>
+      <material name="dark_gray">
+        <color rgba="0.3 0.3 0.3 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.15 0.15 0.05"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Front indicator (green) -->
+  <link name="front_indicator">
+    <inertial>
+      <mass value="0.001"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.05 0.02 0.01"/>
+      </geometry>
+      <material name="green">
+        <color rgba="0 0.8 0 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="front_indicator_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_indicator"/>
+    <origin xyz="0.1 0 0.03" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Arm Front-Right (red) -->
+  <link name="arm_fr">
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.2 0.02 0.01"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0.2 0.2 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="arm_fr_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_fr"/>
+    <origin xyz="0.1 -0.1 0" rpy="0 0 -0.785"/>
+  </joint>
+
+  <!-- Arm Front-Left (red) -->
+  <link name="arm_fl">
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.2 0.02 0.01"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0.2 0.2 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="arm_fl_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_fl"/>
+    <origin xyz="0.1 0.1 0" rpy="0 0 0.785"/>
+  </joint>
+
+  <!-- Arm Back-Right (gray) -->
+  <link name="arm_br">
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.2 0.02 0.01"/>
+      </geometry>
+      <material name="dark_gray">
+        <color rgba="0.3 0.3 0.3 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="arm_br_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_br"/>
+    <origin xyz="-0.1 -0.1 0" rpy="0 0 0.785"/>
+  </joint>
+
+  <!-- Arm Back-Left (gray) -->
+  <link name="arm_bl">
+    <inertial>
+      <mass value="0.02"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.2 0.02 0.01"/>
+      </geometry>
+      <material name="dark_gray">
+        <color rgba="0.3 0.3 0.3 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="arm_bl_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_bl"/>
+    <origin xyz="-0.1 0.1 0" rpy="0 0 -0.785"/>
+  </joint>
+
+  <!-- Motor 0: Front-Right (2807 1300KV ~54g) -->
+  <link name="motor_0">
+    <inertial>
+      <mass value="0.054"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.015" length="0.02"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="motor_0_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="motor_0"/>
+    <origin xyz="0.1475 -0.1475 0.02" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Motor 1: Front-Left (2807 1300KV ~54g) -->
+  <link name="motor_1">
+    <inertial>
+      <mass value="0.054"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.015" length="0.02"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="motor_1_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="motor_1"/>
+    <origin xyz="0.1475 0.1475 0.02" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Motor 2: Back-Right (2807 1300KV ~54g) -->
+  <link name="motor_2">
+    <inertial>
+      <mass value="0.054"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.015" length="0.02"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="motor_2_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="motor_2"/>
+    <origin xyz="-0.1475 -0.1475 0.02" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Motor 3: Back-Left (2807 1300KV ~54g) -->
+  <link name="motor_3">
+    <inertial>
+      <mass value="0.054"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.015" length="0.02"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="motor_3_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="motor_3"/>
+    <origin xyz="-0.1475 0.1475 0.02" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Propeller discs (7040 = 7" diameter, visual only) -->
+  <link name="prop_0">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.0889" length="0.005"/>
+      </geometry>
+      <material name="prop">
+        <color rgba="0.5 0.5 0.5 0.5"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="prop_0_joint" type="fixed">
+    <parent link="motor_0"/>
+    <child link="prop_0"/>
+    <origin xyz="0 0 0.015" rpy="0 0 0"/>
+  </joint>
+
+  <link name="prop_1">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.0889" length="0.005"/>
+      </geometry>
+      <material name="prop">
+        <color rgba="0.5 0.5 0.5 0.5"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="prop_1_joint" type="fixed">
+    <parent link="motor_1"/>
+    <child link="prop_1"/>
+    <origin xyz="0 0 0.015" rpy="0 0 0"/>
+  </joint>
+
+  <link name="prop_2">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.0889" length="0.005"/>
+      </geometry>
+      <material name="prop">
+        <color rgba="0.5 0.5 0.5 0.5"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="prop_2_joint" type="fixed">
+    <parent link="motor_2"/>
+    <child link="prop_2"/>
+    <origin xyz="0 0 0.015" rpy="0 0 0"/>
+  </joint>
+
+  <link name="prop_3">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00002"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <cylinder radius="0.0889" length="0.005"/>
+      </geometry>
+      <material name="prop">
+        <color rgba="0.5 0.5 0.5 0.5"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="prop_3_joint" type="fixed">
+    <parent link="motor_3"/>
+    <child link="prop_3"/>
+    <origin xyz="0 0 0.015" rpy="0 0 0"/>
+  </joint>
+
+</robot>

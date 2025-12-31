@@ -958,7 +958,7 @@ class FlightController:
         # Start flight data logging
         mission_name = None
         if self.mission_executor and self.mission_executor.mission:
-            mission_name = self.mission_executor.mission.get("name")
+            mission_name = self.mission_executor.mission.name
         self.flight_logger.start(mission_name=mission_name)
 
         # Send arm command via MSP: AUX1 (index 4) = 1800

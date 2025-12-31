@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi Drone Control</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Consolas', 'Monaco', monospace;
+            background: #0a0a0a;
+            color: #00ff00;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: #111;
+            border-bottom: 1px solid #333;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .header h1 {
+            font-size: 1.2em;
+            color: #0f0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .connection-panel {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+
+        .connection-panel input {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #0f0;
+            padding: 8px 12px;
+            font-family: inherit;
+            width: 180px;
+        }
+
+        .connection-panel input:focus {
+            outline: none;
+            border-color: #0f0;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #f00;
+            box-shadow: 0 0 5px #f00;
+        }
+
+        .status-indicator.connected {
+            background: #0f0;
+            box-shadow: 0 0 10px #0f0;
+        }
+
+        .status-text {
+            font-size: 0.9em;
+            color: #888;
+        }
+
+        /* Main Layout */
+        .main {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 15px;
+            padding: 15px;
+            height: calc(100vh - 60px);
+        }
+
+        @media (max-width: 900px) {
+            .main {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+        }
+
+        /* Panels */
+        .panel {
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            background: #1a1a1a;
+            padding: 10px 15px;
+            border-bottom: 1px solid #333;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+        }
+
+        .panel-content {
+            padding: 15px;
+        }
+
+        /* Left Column */
+        .left-col {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* Map */
+        #map {
+            height: 300px;
+            background: #1a1a1a;
+        }
+
+        /* Control Buttons */
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .btn {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #0f0;
+            padding: 15px 10px;
+            font-family: inherit;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+
+        .btn:hover {
+            background: #252525;
+            border-color: #0f0;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .btn.arm {
+            border-color: #0f0;
+            color: #0f0;
+        }
+
+        .btn.arm.armed {
+            background: #0f0;
+            color: #000;
+        }
+
+        .btn.disarm {
+            border-color: #ff0;
+            color: #ff0;
+        }
+
+        .btn.emergency {
+            background: #300;
+            border-color: #f00;
+            color: #f00;
+            grid-column: span 2;
+            font-weight: bold;
+        }
+
+        .btn.emergency:hover {
+            background: #500;
+        }
+
+        .btn.takeoff {
+            border-color: #0af;
+            color: #0af;
+        }
+
+        .btn.land {
+            border-color: #fa0;
+            color: #fa0;
+        }
+
+        /* Telemetry */
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .telemetry-item {
+            background: #1a1a1a;
+            padding: 10px;
+            border-left: 2px solid #333;
+        }
+
+        .telemetry-label {
+            font-size: 0.7em;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+
+        .telemetry-value {
+            font-size: 1.1em;
+            color: #0f0;
+        }
+
+        .telemetry-item.warning .telemetry-value {
+            color: #fa0;
+        }
+
+        .telemetry-item.critical .telemetry-value {
+            color: #f00;
+        }
+
+        /* Right Column */
+        .right-col {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-height: calc(100vh - 90px);
+            overflow-y: auto;
+        }
+
+        /* State Badge */
+        .state-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .state-IDLE { background: #333; color: #888; }
+        .state-ARMED { background: #0a3; color: #fff; }
+        .state-TAKING_OFF { background: #05a; color: #fff; }
+        .state-FLYING { background: #0af; color: #000; }
+        .state-MISSION { background: #a0f; color: #fff; }
+        .state-HOVERING { background: #0af; color: #000; }
+        .state-LANDING { background: #fa0; color: #000; }
+        .state-FAILSAFE { background: #f00; color: #fff; animation: blink 0.5s infinite; }
+
+        @keyframes blink {
+            50% { opacity: 0.5; }
+        }
+
+        /* Mission List */
+        .mission-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .mission-item {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            padding: 10px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .mission-item:hover {
+            border-color: #0f0;
+        }
+
+        .mission-item.active {
+            border-color: #0af;
+            background: #0a1a2a;
+        }
+
+        .mission-name {
+            font-size: 0.95em;
+            margin-bottom: 5px;
+        }
+
+        .mission-meta {
+            font-size: 0.75em;
+            color: #666;
+        }
+
+        /* Mission Controls */
+        .mission-controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .mission-controls .btn {
+            flex: 1;
+            min-width: 80px;
+            padding: 10px;
+        }
+
+        /* Active Mission */
+        .active-mission-info {
+            background: #1a1a1a;
+            padding: 10px;
+            border-left: 2px solid #0af;
+        }
+
+        .action-progress {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #0af;
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+
+        /* Logs */
+        .log-container {
+            background: #0a0a0a;
+            height: 150px;
+            overflow-y: auto;
+            font-size: 0.8em;
+            padding: 10px;
+            border: 1px solid #222;
+        }
+
+        .log-entry {
+            margin-bottom: 3px;
+            border-left: 2px solid #333;
+            padding-left: 8px;
+        }
+
+        .log-entry.info { border-color: #0af; }
+        .log-entry.success { border-color: #0f0; }
+        .log-entry.warning { border-color: #fa0; }
+        .log-entry.error { border-color: #f00; }
+
+        .log-time {
+            color: #555;
+            margin-right: 8px;
+        }
+
+        /* Port selector */
+        .port-selector {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .port-selector select {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            color: #0f0;
+            padding: 8px;
+            font-family: inherit;
+            flex: 1;
+        }
+
+        /* Attitude Indicator (simple) */
+        .attitude-display {
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+            padding: 10px;
+            background: #1a1a1a;
+        }
+
+        .attitude-axis {
+            min-width: 60px;
+        }
+
+        .attitude-label {
+            font-size: 0.7em;
+            color: #666;
+        }
+
+        .attitude-value {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Pi Drone</h1>
+    <div class="connection-panel">
+        <span>IP:</span>
+        <input type="text" id="droneIp" value="192.168.1.114" placeholder="IP du drone">
+        <span>:</span>
+        <input type="text" id="dronePort" value="8080" style="width: 60px;">
+        <button class="btn" onclick="connect()">Connect</button>
+        <div class="status-indicator" id="statusIndicator"></div>
+        <span class="status-text" id="statusText">Disconnected</span>
+    </div>
+</div>
+
+<div class="main">
+    <!-- Left Column -->
+    <div class="left-col">
+        <!-- Map -->
+        <div class="panel" style="flex: 1;">
+            <div class="panel-header">GPS Map</div>
+            <div id="map"></div>
+        </div>
+
+        <!-- Controls -->
+        <div class="panel">
+            <div class="panel-header">Controls</div>
+            <div class="panel-content">
+                <div class="control-grid">
+                    <button class="btn arm" id="btnArm" onclick="arm()">ARM</button>
+                    <button class="btn disarm" onclick="disarm()">DISARM</button>
+                    <button class="btn takeoff" onclick="quickTakeoff()">TAKEOFF</button>
+                    <button class="btn land" onclick="quickLand()">LAND</button>
+                    <button class="btn emergency" onclick="emergencyStop()">EMERGENCY STOP</button>
+                    <button class="btn" onclick="pauseMission()">PAUSE</button>
+                    <button class="btn" onclick="resumeMission()">RESUME</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Telemetry -->
+        <div class="panel">
+            <div class="panel-header">Telemetry</div>
+            <div class="panel-content">
+                <div class="attitude-display">
+                    <div class="attitude-axis">
+                        <div class="attitude-label">ROLL</div>
+                        <div class="attitude-value" id="attRoll">0.0</div>
+                    </div>
+                    <div class="attitude-axis">
+                        <div class="attitude-label">PITCH</div>
+                        <div class="attitude-value" id="attPitch">0.0</div>
+                    </div>
+                    <div class="attitude-axis">
+                        <div class="attitude-label">YAW</div>
+                        <div class="attitude-value" id="attYaw">0</div>
+                    </div>
+                </div>
+                <div class="telemetry-grid">
+                    <div class="telemetry-item" id="telAlt">
+                        <div class="telemetry-label">Altitude (m)</div>
+                        <div class="telemetry-value">--</div>
+                    </div>
+                    <div class="telemetry-item" id="telVario">
+                        <div class="telemetry-label">Vario (m/s)</div>
+                        <div class="telemetry-value">--</div>
+                    </div>
+                    <div class="telemetry-item" id="telBatt">
+                        <div class="telemetry-label">Battery (V)</div>
+                        <div class="telemetry-value">--</div>
+                    </div>
+                    <div class="telemetry-item" id="telSats">
+                        <div class="telemetry-label">GPS Sats</div>
+                        <div class="telemetry-value">--</div>
+                    </div>
+                    <div class="telemetry-item" id="telSpeed">
+                        <div class="telemetry-label">Speed (m/s)</div>
+                        <div class="telemetry-value">--</div>
+                    </div>
+                    <div class="telemetry-item" id="telThrottle">
+                        <div class="telemetry-label">Throttle</div>
+                        <div class="telemetry-value">--</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column -->
+    <div class="right-col">
+        <!-- State -->
+        <div class="panel">
+            <div class="panel-header">Flight State</div>
+            <div class="panel-content">
+                <div class="state-badge state-IDLE" id="stateBadge">IDLE</div>
+                <div id="stateInfo" style="font-size: 0.85em; color: #888;"></div>
+            </div>
+        </div>
+
+        <!-- Serial Port -->
+        <div class="panel" id="portPanel">
+            <div class="panel-header">Serial Port</div>
+            <div class="panel-content">
+                <div class="port-selector">
+                    <select id="portSelect">
+                        <option value="">-- Select port --</option>
+                    </select>
+                    <button class="btn" onclick="connectPort()">Connect</button>
+                    <button class="btn" onclick="autoDetectPort()">Auto</button>
+                </div>
+                <div id="portStatus" style="margin-top: 8px; font-size: 0.85em; color: #888;"></div>
+            </div>
+        </div>
+
+        <!-- Missions -->
+        <div class="panel" style="flex: 1;">
+            <div class="panel-header">Missions</div>
+            <div class="panel-content">
+                <div class="mission-list" id="missionList">
+                    <div style="color: #666; font-size: 0.9em;">Loading missions...</div>
+                </div>
+                <div class="mission-controls" style="margin-top: 10px;">
+                    <button class="btn" onclick="startSelectedMission()">START</button>
+                    <button class="btn" onclick="stopMission()">STOP</button>
+                    <button class="btn" onclick="loadMissions()">REFRESH</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Mission -->
+        <div class="panel" id="activeMissionPanel" style="display: none;">
+            <div class="panel-header">Active Mission</div>
+            <div class="panel-content">
+                <div class="active-mission-info" id="activeMissionInfo"></div>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="panel">
+            <div class="panel-header">Logs</div>
+            <div class="log-container" id="logContainer"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Global state
+let baseUrl = '';
+let connected = false;
+let refreshInterval = null;
+let map = null;
+let droneMarker = null;
+let dronePath = [];
+let pathLine = null;
+let selectedMissionUuid = null;
+let lastTelemetry = null;
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    initMap();
+    // Try to connect on load
+    const savedIp = localStorage.getItem('droneIp');
+    const savedPort = localStorage.getItem('dronePort');
+    if (savedIp) document.getElementById('droneIp').value = savedIp;
+    if (savedPort) document.getElementById('dronePort').value = savedPort;
+
+    connect();
+});
+
+// Map initialization
+function initMap() {
+    map = L.map('map').setView([43.48, 1.39], 18);
+
+    // Dark tile layer
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 20
+    }).addTo(map);
+
+    // Drone marker (custom icon)
+    const droneIcon = L.divIcon({
+        className: 'drone-icon',
+        html: '<div style="width:20px;height:20px;background:#0f0;border-radius:50%;border:2px solid #fff;box-shadow:0 0 10px #0f0;"></div>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10]
+    });
+
+    droneMarker = L.marker([43.48, 1.39], { icon: droneIcon }).addTo(map);
+
+    // Path line
+    pathLine = L.polyline([], { color: '#0af', weight: 2, opacity: 0.7 }).addTo(map);
+}
+
+// Connection
+function connect() {
+    const ip = document.getElementById('droneIp').value.trim();
+    const port = document.getElementById('dronePort').value.trim();
+
+    if (!ip) {
+        log('Please enter drone IP', 'error');
+        return;
+    }
+
+    baseUrl = `http://${ip}:${port}`;
+    localStorage.setItem('droneIp', ip);
+    localStorage.setItem('dronePort', port);
+
+    log(`Connecting to ${baseUrl}...`, 'info');
+
+    // Test connection
+    fetch(`${baseUrl}/api/status`)
+        .then(r => {
+            if (!r.ok) throw new Error('Connection failed');
+            return r.json();
+        })
+        .then(data => {
+            connected = true;
+            updateConnectionStatus(true);
+            log('Connected!', 'success');
+
+            // Start refresh loop
+            if (refreshInterval) clearInterval(refreshInterval);
+            refreshInterval = setInterval(refresh, 1000);
+
+            // Initial load
+            refresh();
+            loadMissions();
+            loadPorts();
+        })
+        .catch(err => {
+            connected = false;
+            updateConnectionStatus(false);
+            log(`Connection failed: ${err.message}`, 'error');
+        });
+}
+
+function updateConnectionStatus(isConnected) {
+    const indicator = document.getElementById('statusIndicator');
+    const text = document.getElementById('statusText');
+
+    if (isConnected) {
+        indicator.classList.add('connected');
+        text.textContent = 'Connected';
+    } else {
+        indicator.classList.remove('connected');
+        text.textContent = 'Disconnected';
+    }
+}
+
+// API calls
+async function apiCall(endpoint, method = 'GET', body = null) {
+    const options = {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'cors'
+    };
+    if (body) options.body = JSON.stringify(body);
+
+    const response = await fetch(`${baseUrl}${endpoint}`, options);
+
+    // Handle 404 gracefully
+    if (response.status === 404) {
+        throw new Error('Endpoint not found');
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.error || 'API error');
+    }
+    return data;
+}
+
+// Refresh telemetry
+async function refresh() {
+    if (!connected) return;
+
+    try {
+        // Get status (all data is in here)
+        const status = await apiCall('/api/status');
+
+        lastTelemetry = status;
+        updateTelemetry(status);
+
+        // Extract state from status
+        if (status.state) {
+            updateStateFromStatus(status.state);
+        }
+
+        // Extract mission from status
+        if (status.mission) {
+            updateActiveMission(status.mission);
+        }
+
+    } catch (err) {
+        if (err.message.includes('Failed to fetch')) {
+            connected = false;
+            updateConnectionStatus(false);
+            log('Connection lost', 'error');
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+    }
+}
+
+function updateTelemetry(data) {
+    // Attitude
+    if (data.attitude) {
+        document.getElementById('attRoll').textContent = data.attitude.roll?.toFixed(1) || '0.0';
+        document.getElementById('attPitch').textContent = data.attitude.pitch?.toFixed(1) || '0.0';
+        document.getElementById('attYaw').textContent = Math.round(data.attitude.yaw || 0);
+    }
+
+    // Telemetry grid
+    setTelemetry('telAlt', data.altitude?.toFixed(1) || data.alt_baro?.toFixed(1) || '--');
+    setTelemetry('telVario', data.climb_rate?.toFixed(2) || '--');
+
+    // Battery
+    const vbat = data.battery?.voltage || data.vbat;
+    if (vbat) {
+        const el = document.getElementById('telBatt');
+        el.querySelector('.telemetry-value').textContent = vbat.toFixed(1);
+        el.className = 'telemetry-item' + (vbat < 14.0 ? ' critical' : vbat < 14.8 ? ' warning' : '');
+    }
+
+    // GPS - check both gps and position fields
+    const gpsData = data.gps || data.position;
+    if (gpsData) {
+        setTelemetry('telSats', gpsData.satellites || '--');
+        setTelemetry('telSpeed', gpsData.ground_speed?.toFixed(1) || '--');
+
+        // Update map
+        const lat = gpsData.latitude || gpsData.lat;
+        const lon = gpsData.longitude || gpsData.lon;
+        if (lat && lon) {
+            const pos = [lat, lon];
+            droneMarker.setLatLng(pos);
+
+            // Add to path
+            dronePath.push(pos);
+            if (dronePath.length > 500) dronePath.shift();
+            pathLine.setLatLngs(dronePath);
+
+            // Center map if drone moved significantly
+            const mapCenter = map.getCenter();
+            const dist = map.distance(pos, [mapCenter.lat, mapCenter.lng]);
+            if (dist > 50) {
+                map.panTo(pos);
+            }
+        }
+    }
+
+    // Throttle
+    if (data.rc_channels) {
+        const throttle = data.rc_channels[2];
+        setTelemetry('telThrottle', throttle || '--');
+    } else if (data.throttle !== undefined) {
+        setTelemetry('telThrottle', (data.throttle * 100).toFixed(0) + '%');
+    }
+
+    // Armed state
+    const btnArm = document.getElementById('btnArm');
+    if (data.armed) {
+        btnArm.classList.add('armed');
+        btnArm.textContent = 'ARMED';
+    } else {
+        btnArm.classList.remove('armed');
+        btnArm.textContent = 'ARM';
+    }
+}
+
+function setTelemetry(id, value) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.querySelector('.telemetry-value').textContent = value;
+    }
+}
+
+function updateState(state) {
+    const badge = document.getElementById('stateBadge');
+    const info = document.getElementById('stateInfo');
+
+    const stateName = state.state || state.current_state || 'UNKNOWN';
+
+    // Remove old state classes
+    badge.className = 'state-badge state-' + stateName;
+    badge.textContent = stateName;
+
+    // Additional info
+    let infoText = [];
+    if (state.time_in_state) {
+        infoText.push(`Time: ${state.time_in_state.toFixed(1)}s`);
+    }
+    if (state.can_transition_to) {
+        infoText.push(`Next: ${state.can_transition_to.join(', ')}`);
+    }
+    info.textContent = infoText.join(' | ');
+}
+
+function updateStateFromStatus(stateData) {
+    const badge = document.getElementById('stateBadge');
+    const info = document.getElementById('stateInfo');
+
+    // stateData from /api/status contains: current, is_armed, time_in_state
+    const stateName = stateData.current || (stateData.is_armed ? 'ARMED' : 'IDLE');
+
+    badge.className = 'state-badge state-' + stateName;
+    badge.textContent = stateName;
+
+    let infoText = [];
+    if (stateData.time_in_state) {
+        infoText.push(`Time: ${stateData.time_in_state.toFixed(1)}s`);
+    }
+    info.textContent = infoText.join(' | ');
+}
+
+function updateActiveMission(data) {
+    const panel = document.getElementById('activeMissionPanel');
+    const info = document.getElementById('activeMissionInfo');
+
+    if (!data || data.state === 'IDLE' || data.state === 'COMPLETED' || !data.mission_name) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    panel.style.display = 'block';
+
+    const currentAction = data.current_action;
+    const progress = data.progress_percent ||
+        (data.action_count > 0 ? ((data.current_action_index + 1) / data.action_count * 100).toFixed(0) : 0);
+
+    info.innerHTML = `
+        <div style="margin-bottom: 8px;">
+            <strong>${data.mission_name || 'Unknown'}</strong>
+            <span style="color: #666;"> - ${data.state}</span>
+        </div>
+        ${currentAction ? `
+            <div style="font-size: 0.9em; color: #0af;">
+                Action ${(data.current_action_index || 0) + 1}: ${currentAction.type?.toUpperCase() || 'N/A'}
+                ${currentAction.alt ? ` @ ${currentAction.alt}m` : ''}
+            </div>
+        ` : ''}
+        <div class="action-progress">
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: ${progress}%"></div>
+            </div>
+            <span style="font-size: 0.8em; color: #666;">${progress}%</span>
+        </div>
+    `;
+}
+
+// Missions
+async function loadMissions() {
+    if (!connected) return;
+
+    try {
+        const data = await apiCall('/api/missions');
+        const list = document.getElementById('missionList');
+
+        if (!data.missions || data.missions.length === 0) {
+            list.innerHTML = '<div style="color: #666; font-size: 0.9em;">No missions found</div>';
+            return;
+        }
+
+        list.innerHTML = data.missions.map(m => `
+            <div class="mission-item ${m.uuid === selectedMissionUuid ? 'active' : ''}"
+                 onclick="selectMission('${m.uuid}')">
+                <div class="mission-name">${m.name}</div>
+                <div class="mission-meta">${m.action_count} actions</div>
+            </div>
+        `).join('');
+
+    } catch (err) {
+        log(`Failed to load missions: ${err.message}`, 'error');
+    }
+}
+
+function selectMission(uuid) {
+    selectedMissionUuid = uuid;
+    loadMissions();
+}
+
+async function startSelectedMission() {
+    if (!selectedMissionUuid) {
+        log('Select a mission first', 'warning');
+        return;
+    }
+
+    if (!confirm('Start mission? This will ARM and takeoff.')) return;
+
+    try {
+        const result = await apiCall(`/api/missions/${selectedMissionUuid}/start`, 'POST');
+        log(`Mission started: ${result.message}`, 'success');
+    } catch (err) {
+        log(`Failed to start mission: ${err.message}`, 'error');
+    }
+}
+
+async function stopMission() {
+    try {
+        await apiCall('/api/missions/active/stop', 'POST');
+        log('Mission stopped', 'warning');
+    } catch (err) {
+        log(`${err.message}`, 'error');
+    }
+}
+
+async function pauseMission() {
+    try {
+        await apiCall('/api/missions/active/pause', 'POST');
+        log('Mission paused', 'info');
+    } catch (err) {
+        log(`${err.message}`, 'error');
+    }
+}
+
+async function resumeMission() {
+    try {
+        await apiCall('/api/missions/active/resume', 'POST');
+        log('Mission resumed', 'info');
+    } catch (err) {
+        log(`${err.message}`, 'error');
+    }
+}
+
+// Controls
+async function arm() {
+    try {
+        await apiCall('/api/arm', 'POST');
+        log('Armed', 'success');
+    } catch (err) {
+        log(`Arm failed: ${err.message}`, 'error');
+    }
+}
+
+async function disarm() {
+    try {
+        await apiCall('/api/disarm', 'POST');
+        log('Disarmed', 'info');
+    } catch (err) {
+        log(`Disarm failed: ${err.message}`, 'error');
+    }
+}
+
+async function emergencyStop() {
+    log('!!! EMERGENCY STOP !!!', 'error');
+    try {
+        await apiCall('/api/emergency/disarm', 'POST');
+        log('Emergency disarm sent', 'warning');
+    } catch (err) {
+        log(`Emergency failed: ${err.message}`, 'error');
+    }
+}
+
+async function quickTakeoff() {
+    // Create and start a quick takeoff mission
+    const mission = {
+        version: "1.0",
+        name: "Quick Takeoff",
+        actions: [
+            { type: "takeoff", alt: 2.0 },
+            { type: "hover", duration: 999 }
+        ]
+    };
+
+    try {
+        const created = await apiCall('/api/missions', 'POST', mission);
+        await apiCall(`/api/missions/${created.uuid}/start`, 'POST');
+        log('Takeoff initiated', 'success');
+    } catch (err) {
+        log(`Takeoff failed: ${err.message}`, 'error');
+    }
+}
+
+async function quickLand() {
+    // Stop current mission and create land mission
+    try {
+        await apiCall('/api/missions/active/stop', 'POST').catch(() => {});
+
+        const mission = {
+            version: "1.0",
+            name: "Quick Land",
+            actions: [
+                { type: "land" }
+            ]
+        };
+
+        const created = await apiCall('/api/missions', 'POST', mission);
+        await apiCall(`/api/missions/${created.uuid}/start`, 'POST');
+        log('Landing initiated', 'warning');
+    } catch (err) {
+        log(`Land failed: ${err.message}`, 'error');
+    }
+}
+
+// Serial Ports
+async function loadPorts() {
+    if (!connected) return;
+
+    const panel = document.getElementById('portPanel');
+
+    try {
+        const data = await apiCall('/api/ports');
+        if (panel) panel.style.display = 'block';
+
+        const select = document.getElementById('portSelect');
+        const status = document.getElementById('portStatus');
+
+        select.innerHTML = '<option value="">-- Select port --</option>';
+
+        (data.betaflight_ports || []).forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p + ' (Betaflight)';
+            select.appendChild(opt);
+        });
+
+        (data.ports || []).forEach(p => {
+            if (!data.betaflight_ports?.includes(p)) {
+                const opt = document.createElement('option');
+                opt.value = p;
+                opt.textContent = p;
+                select.appendChild(opt);
+            }
+        });
+
+        if (data.current_port) {
+            select.value = data.current_port;
+            status.textContent = `Connected: ${data.current_port}`;
+            status.style.color = '#0f0';
+        } else {
+            status.textContent = 'Not connected';
+            status.style.color = '#f00';
+        }
+
+    } catch (err) {
+        // Hide ports panel if endpoint not available
+        if (panel) panel.style.display = 'none';
+    }
+}
+
+async function connectPort() {
+    const port = document.getElementById('portSelect').value;
+    if (!port) {
+        log('Select a port first', 'warning');
+        return;
+    }
+
+    try {
+        await apiCall('/api/ports/connect', 'POST', { port });
+        log(`Connected to ${port}`, 'success');
+        loadPorts();
+    } catch (err) {
+        log(`Port connect failed: ${err.message}`, 'error');
+    }
+}
+
+async function autoDetectPort() {
+    try {
+        const result = await apiCall('/api/ports/connect', 'POST', {});
+        log(`Auto-detected: ${result.port}`, 'success');
+        loadPorts();
+    } catch (err) {
+        log(`Auto-detect failed: ${err.message}`, 'error');
+    }
+}
+
+// Logging
+function log(message, type = 'info') {
+    const container = document.getElementById('logContainer');
+    const time = new Date().toLocaleTimeString();
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    entry.innerHTML = `<span class="log-time">${time}</span>${message}`;
+
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
+
+    // Keep only last 50 entries
+    while (container.children.length > 50) {
+        container.removeChild(container.firstChild);
+    }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    // Only if not in input field
+    if (e.target.tagName === 'INPUT') return;
+
+    switch(e.key.toLowerCase()) {
+        case 'escape':
+            emergencyStop();
+            break;
+        case 'a':
+            if (e.ctrlKey) arm();
+            break;
+        case 'd':
+            if (e.ctrlKey) disarm();
+            break;
+    }
+});
+</script>
+
+</body>
+</html>
