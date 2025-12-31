@@ -389,8 +389,14 @@ class FlightController:
 
         # Get mission action
         mission_action = ""
-        if self.mission_executor and self.mission_executor.current_action:
-            mission_action = self.mission_executor.current_action.get("type", "")
+        if self.mission_executor and self.mission_executor.mission:
+            try:
+                idx = self.mission_executor.current_action_index
+                if 0 <= idx < len(self.mission_executor.mission.actions):
+                    action = self.mission_executor.mission.actions[idx]
+                    mission_action = action.action_type.value
+            except (IndexError, AttributeError):
+                pass
 
         # GPS data
         gps = self._last_gps_fix

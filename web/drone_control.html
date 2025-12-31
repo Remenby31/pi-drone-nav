@@ -720,9 +720,13 @@ function updateTelemetry(data) {
         document.getElementById('attYaw').textContent = Math.round(data.attitude.yaw || 0);
     }
 
-    // Telemetry grid
-    setTelemetry('telAlt', data.altitude?.toFixed(1) || data.alt_baro?.toFixed(1) || '--');
-    setTelemetry('telVario', data.climb_rate?.toFixed(2) || '--');
+    // Altitude - check position.alt or landing.height_agl
+    const altitude = data.position?.alt || data.landing?.height_agl || data.altitude;
+    setTelemetry('telAlt', altitude?.toFixed(1) || '--');
+
+    // Vario - check landing.descent_rate or climb_rate
+    const vario = data.landing?.descent_rate || data.climb_rate;
+    setTelemetry('telVario', vario?.toFixed(2) || '--');
 
     // Battery
     const vbat = data.battery?.voltage || data.vbat;
@@ -759,17 +763,17 @@ function updateTelemetry(data) {
         }
     }
 
-    // Throttle
+    // Throttle - check hover_throttle or rc_channels
     if (data.rc_channels) {
-        const throttle = data.rc_channels[2];
-        setTelemetry('telThrottle', throttle || '--');
-    } else if (data.throttle !== undefined) {
-        setTelemetry('telThrottle', (data.throttle * 100).toFixed(0) + '%');
+        setTelemetry('telThrottle', data.rc_channels[2] || '--');
+    } else if (data.hover_throttle !== undefined) {
+        setTelemetry('telThrottle', (data.hover_throttle * 100).toFixed(0) + '%');
     }
 
     // Armed state
     const btnArm = document.getElementById('btnArm');
-    if (data.armed) {
+    const isArmed = data.armed || data.state?.is_armed;
+    if (isArmed) {
         btnArm.classList.add('armed');
         btnArm.textContent = 'ARMED';
     } else {
@@ -810,8 +814,8 @@ function updateStateFromStatus(stateData) {
     const badge = document.getElementById('stateBadge');
     const info = document.getElementById('stateInfo');
 
-    // stateData from /api/status contains: current, is_armed, time_in_state
-    const stateName = stateData.current || (stateData.is_armed ? 'ARMED' : 'IDLE');
+    // stateData from /api/status contains: state, is_armed, time_in_state
+    const stateName = stateData.state || (stateData.is_armed ? 'ARMED' : 'IDLE');
 
     badge.className = 'state-badge state-' + stateName;
     badge.textContent = stateName;
@@ -819,6 +823,9 @@ function updateStateFromStatus(stateData) {
     let infoText = [];
     if (stateData.time_in_state) {
         infoText.push(`Time: ${stateData.time_in_state.toFixed(1)}s`);
+    }
+    if (stateData.previous_state) {
+        infoText.push(`Prev: ${stateData.previous_state}`);
     }
     info.textContent = infoText.join(' | ');
 }

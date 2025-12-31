@@ -156,6 +156,11 @@ class HoverThrottleLearner:
         if not self.config.save_on_disarm:
             return
 
+        # Don't overwrite saved value if we haven't learned anything
+        if self._samples_count == 0:
+            logger.debug("Not saving hover throttle: no samples collected")
+            return
+
         try:
             data = {
                 'hover_throttle': self._hover_throttle,
