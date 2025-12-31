@@ -1,108 +1,90 @@
 # TODO - Pi Drone Navigation
 
+## URGENT - Raspberry Pi mouille (31 Dec 2025)
+
+### Etat actuel
+- Raspberry Pi tombe dans l'herbe mouillee lors du test 4
+- Clignote 8x vert au boot (erreur SD card ou boot?)
+- Ne demarre pas
+- En attente de sechage
+
+### Actions a faire
+- [ ] Attendre sechage complet (plusieurs heures minimum)
+- [ ] Tenter redemarrage
+- [ ] Si ne demarre pas: verifier carte SD sur autre lecteur
+- [ ] Recuperer les logs du vol (`~/.pidrone/logs/`)
+- [ ] Analyser le CSV du test 4 pour comprendre ce qui s'est passe
+- [ ] Evaluer les degats materiels
+
+### Code clignotant Raspberry Pi
+- 8 clignotements verts = probleme lecture carte SD
+- Solutions possibles:
+  - Reinserer la carte SD
+  - Verifier contacts de la carte
+  - Lire la carte sur PC pour backup
+  - Reflasher si necessaire
+
 ---
 
-## Test avec ficelle (31 Dec 2025)
+## Analyse logs a faire (quand Pi accessible)
 
-### Changement de méthode
-Utiliser une **ficelle** au lieu d'une glissière :
-- Le drone sera plus libre de ses mouvements
-- Moins de risque de blocage mécanique
-- Permet de tester les corrections d'attitude
-
-### Mission à tester
-`Test Hover 1m`
-1. Takeoff → 1m
-2. Hover 3s
-3. Land
-
-### Checklist avant test
-- [ ] hover_throttle = 0.5 (vérifier `~/.pidrone/hover_throttle.json`)
-- [ ] Flight logging actif (automatique au ARM)
-- [ ] Ficelle assez longue (~2m)
-- [ ] Point d'attache solide au-dessus du drone
-- [ ] Hélices montées
-- [ ] Batterie chargée (>14.8V pour 4S)
-- [ ] GPS fix (>5 sats)
-- [ ] Zone dégagée
-
-### Commandes
+### Fichiers a recuperer
 ```bash
-# Vérifier hover_throttle
-ssh drone@192.168.1.114 "cat ~/.pidrone/hover_throttle.json"
-
-# Lancer la mission
-curl -X POST http://192.168.1.114:8080/api/missions/50d4ebda-b217-47a5-9d30-a077c848bb93/start
-
-# ARRÊT D'URGENCE
-curl -X POST http://192.168.1.114:8080/api/missions/active/stop
-
-# Récupérer les logs après le test
+# Logs CSV de vol
 scp drone@192.168.1.114:~/.pidrone/logs/*.csv .
+
+# Logs systeme
+sshpass -p "drone" ssh drone@192.168.1.114 "sudo journalctl -u pidrone --since '2025-12-31 09:30' --no-pager" > flight_logs.txt
 ```
+
+### Points a analyser
+- [ ] Sequence complete du test 4
+- [ ] Altitude max atteinte
+- [ ] Throttle applique
+- [ ] Cause de la chute (tilt? timeout? autre?)
+- [ ] Duree du vol
 
 ---
 
-## Test sans hélices (30 Dec 2025) - DONE
+## Fixes appliques aujourd'hui (31 Dec 2025)
 
-### Pré-requis
-- [ ] Hélices retirées
-- [ ] Batterie chargée
-- [ ] FC connecté USB (/dev/ttyACM0)
-- [ ] GPS fix (optionnel pour test indoor)
+| Fix | Commit | Description |
+|-----|--------|-------------|
+| Mission.name | 332067f | Acces attribut au lieu de dict.get() |
+| Flight logging | 8dfb07d | current_action via mission.actions[idx] |
+| hover_throttle save | 8dfb07d | Ne pas ecraser si 0 samples |
+| Emergency disarm | c41d140 | Endpoint /api/emergency/disarm |
+| max_tilt | 36df22b | 25 -> 35 degres |
 
-### 1. Vérifier fix map (inversion ch2/ch3) - DONE
+---
+
+## Prochains tests (quand Pi OK)
+
+### Test avec ficelle (reprise)
+- [ ] Verifier que le Pi fonctionne
+- [ ] Verifier integrite du code et config
+- [ ] Secher completement le drone
+- [ ] Refaire test hover 2m
+
+### Ameliorations a considerer
+- [ ] Ajouter watchdog reseau (disarm si perte connexion)
+- [ ] Logger plus de details sur les abort
+- [ ] Considerer protection etanche pour le Pi
+
+---
+
+## Commandes utiles
+
 ```bash
-# Betaflight CLI: map AETR1234
-# Fix appliqué dans msp.py:set_raw_rc() - swap ch2/ch3 avant envoi
-# Testé et validé 30 Dec 2025
+# Arrêt d'urgence
+curl -X POST http://192.168.1.114:8080/api/emergency/disarm
+
+# Status
+curl http://192.168.1.114:8080/api/status
+
+# Lancer mission 2m
+curl -X POST http://192.168.1.114:8080/api/missions/aff0b25b-510e-47d6-9d60-a568386d1568/start
+
+# Stop mission (land + disarm)
+curl -X POST http://192.168.1.114:8080/api/missions/active/stop
 ```
-
-### 2. Test ARM/DISARM
-```bash
-python -m src.main --cli
-```
-
-Dans le CLI:
-```
-> status          # Vérifier état IDLE
-> arm             # Doit afficher "ARM command sent: AUX1=1800"
-> status          # Vérifier état ARMED
-> disarm          # Doit afficher "DISARM command sent: AUX1=1000"
-```
-
-### 3. Test mission hover 2m (sans props!)
-```
-> load config/missions/test_hover_2m.json
-> arm
-> takeoff 2
-```
-
-Observer les logs:
-- [ ] `Starting takeoff sequence`
-- [ ] `Motor spinup phase`
-- [ ] `Throttle ramp phase`
-- [ ] Phase transitions dans les logs
-- [ ] Timeout 10s si pas de liftoff détecté (normal sans props)
-
-### 4. Test landing (simulé)
-Après takeoff timeout → devrait passer en LANDING:
-- [ ] `Starting iNav-style landing sequence`
-- [ ] `Landing phase: PHASE_HIGH`
-- [ ] `Landing phase: PHASE_MID`
-- [ ] `Landing phase: PHASE_FINAL`
-- [ ] Touchdown detection (fallback après 2s)
-- [ ] Auto-disarm
-
-## Problèmes connus à vérifier
-
-| Issue | Status | Action |
-|-------|--------|--------|
-| map ch2/ch3 | FIXED | Vérifier avec `map` dans CLI |
-| ARM via MSP | FIXED | Vérifier AUX1=1800 arme vraiment |
-| Timeouts | 10s/20s | OK pour test rapide |
-
-## Notes
-- Garder main sur kill switch (déconnecter batterie si problème)
-- Les moteurs NE DOIVENT PAS tourner sans hélices en test normal
-- Si moteurs tournent → disarm immédiat ou déconnecter batterie
