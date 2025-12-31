@@ -194,7 +194,7 @@ takeoff:
   # Safety limits
   max_throttle: 0.75            # Never exceed during takeoff
   min_throttle: 0.1             # Never go below
-  max_tilt_deg: 25.0            # Abort if tilted more
+  max_tilt_deg: 35.0            # Abort if tilted more (was 25, too strict with string)
   timeout_s: 10.0               # Abort if no liftoff
   altitude_tolerance_m: 0.5     # Close enough to target
 
