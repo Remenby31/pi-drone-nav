@@ -172,7 +172,7 @@ logging:
 takeoff:
   # Target
   default_altitude_m: 3.0
-  target_climb_rate_ms: 1.0     # Target vertical speed during climb (m/s)
+  target_climb_rate_ms: 0.3     # Target vertical speed during climb (m/s) - TEST: très lent
 
   # Spinup phase
   spinup_time_ms: 500           # Motor spinup before PID engages
@@ -224,10 +224,10 @@ hover_learn:
 
 # Landing settings (iNav-style 3-phase landing)
 landing:
-  # Descent speeds per phase (m/s)
-  speed_high: 1.5               # Phase haute (> 5m AGL)
-  speed_mid: 0.7                # Phase moyenne (1-5m AGL)
-  speed_final: 0.3              # Phase finale (< 1m AGL)
+  # Descent speeds per phase (m/s) - TEST: très lent
+  speed_high: 0.5               # Phase haute (> 5m AGL) - iNav: 1.5
+  speed_mid: 0.25               # Phase moyenne (1-5m AGL) - iNav: 0.7
+  speed_final: 0.15             # Phase finale (< 1m AGL) - iNav: 0.3
 
   # Altitude thresholds (meters AGL)
   threshold_high: 5.0           # Switch to mid phase below this
