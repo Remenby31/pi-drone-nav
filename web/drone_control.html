@@ -555,12 +555,25 @@
 let baseUrl = '';
 let connected = false;
 let refreshInterval = null;
+let heartbeatInterval = null;  // WiFi failsafe heartbeat
 let map = null;
 let droneMarker = null;
 let dronePath = [];
 let pathLine = null;
 let selectedMissionUuid = null;
 let lastTelemetry = null;
+
+// WiFi failsafe heartbeat (sends POST /api/heartbeat every 500ms)
+function sendHeartbeat() {
+    if (!connected || !baseUrl) return;
+
+    fetch(`${baseUrl}/api/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    }).catch(() => {
+        // Silent fail - connection loss will be detected by main refresh loop
+    });
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -629,6 +642,11 @@ function connect() {
             if (refreshInterval) clearInterval(refreshInterval);
             refreshInterval = setInterval(refresh, 1000);
 
+            // Start heartbeat for WiFi failsafe (every 500ms)
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(sendHeartbeat, 500);
+            sendHeartbeat();  // Send first heartbeat immediately
+
             // Initial load
             refresh();
             loadMissions();
@@ -651,6 +669,11 @@ function updateConnectionStatus(isConnected) {
     } else {
         indicator.classList.remove('connected');
         text.textContent = 'Disconnected';
+        // Stop heartbeat when disconnected
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+        }
     }
 }
 

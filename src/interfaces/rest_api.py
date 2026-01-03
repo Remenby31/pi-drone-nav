@@ -6,6 +6,7 @@ All flight control goes through missions.
 """
 
 import threading
+import time
 from typing import TYPE_CHECKING, Optional
 import logging
 
@@ -46,6 +47,7 @@ def create_api_server(flight_controller: 'FlightController',
 
     server = APIServer(flight_controller, port, host, missions_dir)
     flight_controller.set_mission_executor(server.mission_executor)
+    flight_controller.set_api_server(server)  # For WiFi failsafe heartbeat
     server.start()
     return server
 
@@ -67,6 +69,11 @@ class APIServer:
         self.mission_executor = MissionExecutor()
 
         self._thread: Optional[threading.Thread] = None
+
+        # Heartbeat tracking for WiFi failsafe
+        self._last_heartbeat_time: float = 0.0
+        self._heartbeat_active: bool = False
+
         self._setup_routes()
 
     def _setup_routes(self):
@@ -83,6 +90,31 @@ class APIServer:
         def get_state():
             """Get flight state machine status"""
             return jsonify(self.fc.state_machine.get_status())
+
+        # ==================== Heartbeat (WiFi Failsafe) ====================
+
+        @self.app.route('/api/heartbeat', methods=['POST'])
+        def heartbeat():
+            """
+            Client heartbeat for WiFi failsafe
+
+            Client must send this regularly (recommended: every 500ms).
+            If no heartbeat for configured timeout, drone will emergency disarm.
+
+            Returns:
+                {status: 'ok', timestamp: float, timeout_ms: int}
+            """
+            self._last_heartbeat_time = time.time()
+            self._heartbeat_active = True
+
+            from ..config import get_config
+            config = get_config()
+
+            return jsonify({
+                'status': 'ok',
+                'timestamp': self._last_heartbeat_time,
+                'timeout_ms': config.wifi_failsafe.timeout_ms
+            })
 
         # ==================== Missions ====================
 
@@ -451,3 +483,20 @@ class APIServer:
     def get_executor(self) -> MissionExecutor:
         """Get mission executor"""
         return self.mission_executor
+
+    def get_heartbeat_age(self) -> float:
+        """
+        Get time since last heartbeat in seconds
+
+        Returns:
+            -1.0 if no heartbeat ever received (failsafe inactive)
+            Otherwise, seconds since last heartbeat
+        """
+        if not self._heartbeat_active:
+            return -1.0
+        return time.time() - self._last_heartbeat_time
+
+    def reset_heartbeat(self):
+        """Reset heartbeat state (e.g., after disarm)"""
+        self._heartbeat_active = False
+        self._last_heartbeat_time = 0.0

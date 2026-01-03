@@ -167,6 +167,18 @@ logging:
   flight_log_enabled: true
   flight_log_rate: 10  # Hz
 
+# WiFi failsafe settings (heartbeat-based)
+wifi_failsafe:
+  # Enable WiFi failsafe
+  enabled: true
+
+  # Timeout before disarm (milliseconds)
+  # If no heartbeat received for this duration, emergency disarm
+  timeout_ms: 2000
+
+  # Recommended heartbeat interval for client (informational)
+  heartbeat_interval_ms: 500
+
 # Takeoff settings (iNav-style velocity PID)
 # Uses same velocity Z gains as altitude controller (iNav nav_mc_vel_z_*)
 takeoff:

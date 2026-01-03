@@ -239,6 +239,20 @@ class TakeoffConfig:
 
 
 @dataclass
+class WifiFailsafeConfig:
+    """WiFi failsafe configuration (heartbeat-based emergency disarm)"""
+
+    # Enable WiFi failsafe
+    enabled: bool = True
+
+    # Timeout before emergency disarm (milliseconds)
+    timeout_ms: int = 2000
+
+    # Recommended heartbeat interval for client (informational)
+    heartbeat_interval_ms: int = 500
+
+
+@dataclass
 class HoverLearnConfig:
     """Hover throttle learning configuration (ArduPilot MOT_THST_HOVER style)"""
 
@@ -270,6 +284,7 @@ class Config:
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
     takeoff: TakeoffConfig = field(default_factory=TakeoffConfig)
     hover_learn: HoverLearnConfig = field(default_factory=HoverLearnConfig)
+    wifi_failsafe: WifiFailsafeConfig = field(default_factory=WifiFailsafeConfig)
 
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "Config":
@@ -328,7 +343,7 @@ class Config:
         data = {}
         for section_name in ['serial', 'gps', 'navigation', 'altitude',
                             'failsafe', 'interface', 'simulation',
-                            'takeoff', 'hover_learn']:
+                            'takeoff', 'hover_learn', 'wifi_failsafe']:
             section = getattr(self, section_name)
             data[section_name] = {k: v for k, v in section.__dict__.items()}
 

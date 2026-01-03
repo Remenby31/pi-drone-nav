@@ -306,6 +306,50 @@ sudo journalctl -u pidrone -f    # Logs temps réel
 | `POST /api/missions/<uuid>/start` | Lancer mission |
 | `POST /api/missions/active/stop` | Stop + land + disarm |
 | `POST /api/emergency/disarm` | **Coupe moteurs immédiat** |
+| `POST /api/heartbeat` | Heartbeat client (WiFi failsafe) |
+
+---
+
+## WiFi Failsafe (Heartbeat)
+
+**But:** Désarmer automatiquement si le client perd la connexion WiFi.
+
+### Configuration
+
+```yaml
+# config/default.yaml
+wifi_failsafe:
+  enabled: true
+  timeout_ms: 2000        # Désarme si pas de heartbeat pendant 2s
+  heartbeat_interval_ms: 500  # Intervalle recommandé
+```
+
+### Côté client
+
+Le client doit envoyer un heartbeat régulièrement:
+
+```bash
+# Toutes les 500ms
+while true; do
+    curl -X POST http://192.168.1.114:8080/api/heartbeat
+    sleep 0.5
+done
+```
+
+Python:
+```python
+import requests, time
+while True:
+    requests.post('http://192.168.1.114:8080/api/heartbeat', timeout=0.5)
+    time.sleep(0.5)
+```
+
+### Comportement
+
+1. Le failsafe ne s'active qu'après le premier heartbeat reçu
+2. Si aucun heartbeat pendant `timeout_ms` et drone armé → **EMERGENCY DISARM**
+3. Les moteurs coupent immédiatement (pas d'atterrissage)
+4. Log critique pour diagnostic post-incident
 
 ---
 
@@ -316,6 +360,29 @@ sudo journalctl -u pidrone -f    # Logs temps réel
 - State machine enforces valid transitions only - check `state_machine.py`
 - All serial communication goes through `serial_manager.py`
 - Configuration supports environment variable overrides: `PIDRONE_NAVIGATION_POSITION_KP=1.0`
+
+### Deploying Code Changes to Drones - CRITICAL
+
+**Python keeps modules in memory.** Modifying `.py` files on disk does NOT affect a running service. You MUST restart the service for changes to take effect.
+
+**Workflow:**
+```bash
+# 1. Make changes locally (on dev machine)
+# 2. Commit and push
+git add -A && git commit -m "fix: description" && git push
+
+# 3. SSH to drone and pull changes
+ssh drone@192.168.1.114
+cd ~/pi_drone_nav && git pull
+
+# 4. RESTART THE SERVICE (mandatory!)
+sudo systemctl restart pidrone
+
+# 5. Verify service is running
+sudo systemctl status pidrone
+```
+
+**WARNING:** If you forget step 4, the drone will run with OLD CODE and you will waste flight tests (logs empty, fixes not applied, etc.). This happened on 31 Dec 2025 - see TIMELINE.md.
 
 ### Betaflight CLI Mode - Important
 

@@ -101,6 +101,9 @@ class FlightController:
         # Preflight state
         self._preflight_result: Optional[PreflightResult] = None
 
+        # API server reference (for WiFi failsafe heartbeat)
+        self._api_server = None
+
         # Flight data logger (50Hz CSV logging)
         self.flight_logger = FlightDataLogger()
         self._last_imu = None  # For logging IMU data
@@ -583,6 +586,44 @@ class FlightController:
             except MSPError as e:
                 logger.warning(f"MSP read error: {e}")
 
+    def _emergency_disarm(self, reason: str = "Emergency"):
+        """
+        Force immediate motor shutdown - use only in emergencies
+
+        This bypasses normal state checks and forces motors OFF.
+
+        Args:
+            reason: Reason for emergency disarm (for logging)
+        """
+        logger.critical(f"!!! EMERGENCY DISARM: {reason} !!!")
+        self._armed = False
+
+        # Send disarm command 10x for redundancy
+        disarm_rc = [1500, 1500, 885, 1500, 1000, 1000, 1500, 1500]
+        if self.msp:
+            for _ in range(10):
+                try:
+                    self.msp.set_raw_rc(disarm_rc)
+                except Exception:
+                    pass  # Best effort
+
+        # Force state to IDLE (bypass normal transitions)
+        self.state_machine._state = FlightState.IDLE
+
+        # Stop flight logging
+        self.flight_logger.stop()
+
+        # Reset heartbeat state
+        if self._api_server:
+            self._api_server.reset_heartbeat()
+
+        # Stop any active mission
+        if self.mission_executor:
+            try:
+                self.mission_executor.stop()
+            except Exception:
+                pass
+
     def _check_failsafe(self):
         """Check for failsafe conditions"""
         config = self.config.failsafe
@@ -595,6 +636,21 @@ class FlightController:
                     logger.warning(f"GPS timeout: {gps_age_ms:.0f}ms")
                     if config.on_gps_loss == "betaflight":
                         self.state_machine.trigger_failsafe("GPS timeout")
+
+        # WiFi failsafe (heartbeat-based)
+        wifi_config = self.config.wifi_failsafe
+        if wifi_config.enabled and self._api_server:
+            heartbeat_age = self._api_server.get_heartbeat_age()
+            timeout_sec = wifi_config.timeout_ms / 1000.0
+
+            # Only trigger if heartbeat was active (client had connected)
+            # heartbeat_age < 0 means no heartbeat ever received
+            if heartbeat_age > 0 and heartbeat_age > timeout_sec:
+                if self._armed:
+                    self._emergency_disarm(
+                        f"WiFi heartbeat lost ({heartbeat_age:.1f}s > {timeout_sec:.1f}s)"
+                    )
+                    return  # Skip other checks after emergency disarm
 
         # State timeout
         if self.state_machine.check_timeout():
@@ -1118,6 +1174,15 @@ class FlightController:
         # Setup callbacks
         executor.on_mission_complete(self._on_mission_v2_complete)
         executor.on_disarm_request(self._on_mission_v2_disarm)
+
+    def set_api_server(self, api_server):
+        """
+        Set the API server reference for WiFi failsafe
+
+        Args:
+            api_server: APIServer instance with heartbeat tracking
+        """
+        self._api_server = api_server
 
     def start_mission_v2(self) -> bool:
         """

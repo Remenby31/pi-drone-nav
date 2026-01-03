@@ -67,7 +67,7 @@ sshpass -p "drone" ssh drone@192.168.1.114 "sudo journalctl -u pidrone --since '
 - [ ] Refaire test hover 2m
 
 ### Ameliorations a considerer
-- [ ] Ajouter watchdog reseau (disarm si perte connexion)
+- [x] Ajouter watchdog reseau (disarm si perte connexion) ✓ Implémenté via /api/heartbeat
 - [ ] Logger plus de details sur les abort
 - [ ] Considerer protection etanche pour le Pi
 
